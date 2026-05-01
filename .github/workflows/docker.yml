@@ -1,0 +1,224 @@
+name: Build & Push Docker Image
+
+on:
+  # 自动触发：推送到 main/master 分支，或推送版本 tag（v*.*.*）
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*.*.*"
+
+  # 手动触发：可在 Actions 页面填写自定义版本号
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: "额外版本 tag（如 v1.2.3，留空则仅推 latest）"
+        required: false
+        default: ""
+      push_latest:
+        description: "是否同时推送 latest 标签"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}   # ghcr.io/<owner>/<repo>
+
+jobs:
+  build:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write      # 推送到 GHCR 需要此权限
+
+    outputs:
+      image_digest: ${{ steps.build.outputs.digest }}
+      image_tags:   ${{ steps.meta.outputs.tags }}
+      version:      ${{ steps.ver.outputs.version }}
+
+    steps:
+      # ── 1. 检出代码 ──────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. 从 Cargo.toml 读取版本号 ──────────────────
+      - name: Extract version from Cargo.toml
+        id: ver
+        run: |
+          VER=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "🔖 Cargo version: ${VER}"
+
+      # ── 3. 设置 Docker Buildx ────────────────────────
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ── 4. 登录 GitHub Container Registry ───────────
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── 5. 生成镜像元数据（tags + labels）────────────
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # 版本 tag（git tag 触发时）: v1.2.3 → 1.2.3 + 1.2 + 1
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            # Cargo.toml 版本（所有分支构建都带上）
+            type=raw,value=${{ steps.ver.outputs.version }}
+            # 手动触发时的自定义版本
+            type=raw,value=${{ github.event.inputs.version_tag }},enable=${{ github.event.inputs.version_tag != '' }}
+            # latest（main/master 分支 或 手动选择时）
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event.inputs.push_latest == 'true' }}
+            # 短 commit SHA（所有触发都加）
+            type=sha,prefix=sha-,format=short
+          labels: |
+            org.opencontainers.image.title=洞天福地 Hidden
+            org.opencontainers.image.description=115 Share Pool Automation System
+            org.opencontainers.image.version=${{ steps.ver.outputs.version }}
+
+      # ── 6. 构建并推送镜像 ────────────────────────────
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          # 构建参数：将 commit SHA 和构建时间注入到二进制
+          build-args: |
+            BUILD_VERSION=${{ steps.ver.outputs.version }}
+            BUILD_SHA=${{ github.sha }}
+            BUILD_TIME=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+
+  # ── 构建结果摘要 ────────────────────────────────────────────────
+  summary:
+    name: Build Summary
+    runs-on: ubuntu-latest
+    needs: build
+    if: always()
+    steps:
+      - name: Write job summary
+        run: |
+          echo "## 🏔️ 洞天福地 Hidden — 构建结果" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 字段 | 值 |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|----|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **版本** | \`${{ needs.build.outputs.version }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Commit** | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **分支/Tag** | \`${{ github.ref_name }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **触发方式** | ${{ github.event_name }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **构建时间** | $(date -u '+%Y-%m-%d %H:%M UTC') |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **镜像摘要** | \`${{ needs.build.outputs.image_digest }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### 📦 镜像标签" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ needs.build.outputs.image_tags }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### 🚀 快速部署" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`bash" >> "$GITHUB_STEP_SUMMARY"
+          echo "# 拉取最新镜像" >> "$GITHUB_STEP_SUMMARY"
+          echo "docker pull ghcr.io/${{ github.repository }}:latest" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "# 或指定版本" >> "$GITHUB_STEP_SUMMARY"
+          echo "docker pull ghcr.io/${{ github.repository }}:${{ needs.build.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
+
+  # ── 自动创建 GitHub Release（仅版本 tag 触发）──────────────────
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    # 仅在推送 v*.*.* tag 时执行
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write    # 创建 Release 需要此权限
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 获取完整历史以生成 changelog
+
+      # 提取从上个 tag 到此 tag 的 commits 作为 changelog
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV" ]; then
+            LOG=$(git log --pretty=format:"- %s ([%h](https://github.com/${{ github.repository }}/commit/%H))" "$PREV"..HEAD)
+          else
+            LOG=$(git log --pretty=format:"- %s ([%h](https://github.com/${{ github.repository }}/commit/%H))" HEAD)
+          fi
+          # 写入文件（避免多行字符串问题）
+          {
+            echo "CHANGELOG<<EOF"
+            echo "$LOG"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "🏔️ Hidden ${{ github.ref_name }}"
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}   # v1.0.0-beta 视为预发布
+          body: |
+            ## 🏔️ 洞天福地 Hidden ${{ github.ref_name }}
+
+            ### 📦 Docker 镜像
+
+            | 标签 | 说明 |
+            |------|------|
+            | `ghcr.io/${{ github.repository }}:${{ needs.build.outputs.version }}` | 此版本（推荐生产使用） |
+            | `ghcr.io/${{ github.repository }}:latest` | 最新稳定版 |
+            | `ghcr.io/${{ github.repository }}:sha-${{ github.sha }}` | 精确 commit 对应镜像 |
+
+            ### 🚀 快速部署
+
+            ```bash
+            # 拉取此版本
+            docker pull ghcr.io/${{ github.repository }}:${{ needs.build.outputs.version }}
+
+            # 使用 docker-compose（推荐）
+            curl -O https://raw.githubusercontent.com/${{ github.repository }}/main/docker-compose.yml
+            echo "POSTGRES_PASSWORD=your_secure_password" > .env
+            docker compose up -d
+            # 然后访问 http://localhost:8080 → 系统设置 填写 115 Cookie
+            ```
+
+            ### 🔧 构建信息
+
+            | 字段 | 值 |
+            |------|----|
+            | **版本** | `${{ needs.build.outputs.version }}` |
+            | **Commit** | `${{ github.sha }}` |
+            | **镜像摘要** | `${{ needs.build.outputs.image_digest }}` |
+            | **构建时间** | ${{ github.event.head_commit.timestamp || github.event.created_at }} |
+            | **构建平台** | `linux/amd64`, `linux/arm64` |
+
+            ### 📝 更新内容
+
+            ${{ steps.changelog.outputs.CHANGELOG }}
+
