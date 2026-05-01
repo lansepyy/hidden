@@ -37,6 +37,22 @@ jobs:
       contents: read
       packages: write      # 推送到 GHCR 需要此权限
 
+    # sqlx 离线缓存生成需要 postgres
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: hidden
+          POSTGRES_PASSWORD: hidden
+          POSTGRES_DB: hidden
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
     outputs:
       image_digest: ${{ steps.build.outputs.digest }}
       image_tags:   ${{ steps.meta.outputs.tags }}
@@ -54,6 +70,35 @@ jobs:
           VER=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
           echo "🔖 Cargo version: ${VER}"
+
+      # ── 2.5 生成 sqlx 离线查询缓存（供 Docker 编译使用）──
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry & sqlx-cli binary
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/sqlx
+          key: ${{ runner.os }}-sqlx-cli-0.7-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-sqlx-cli-0.7-
+
+      - name: Install sqlx-cli
+        run: |
+          if ! command -v sqlx &> /dev/null; then
+            cargo install sqlx-cli --no-default-features --features postgres --locked
+          fi
+
+      - name: Run migrations & generate sqlx offline cache
+        env:
+          DATABASE_URL: postgres://hidden:hidden@localhost:5432/hidden
+        run: |
+          sqlx migrate run --source ./migrations
+          cargo sqlx prepare
+          echo "✅ .sqlx/ 离线缓存已生成"
 
       # ── 3. 设置 Docker Buildx ────────────────────────
       - name: Set up Docker Buildx
