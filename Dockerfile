@@ -10,7 +10,8 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /build
 
 # 先复制 Cargo.toml / Cargo.lock 以利用 Docker 缓存层
-COPY Cargo.toml Cargo.lock ./
+# Cargo.lock* 用 glob，有则复制，无则跳过（CI 首次构建时可能不存在）
+COPY Cargo.toml Cargo.lock* ./
 # 创建空 main.rs 用于预编译依赖
 RUN mkdir -p src && echo "fn main() {}" > src/main.rs
 RUN cargo build --release 2>/dev/null || true
