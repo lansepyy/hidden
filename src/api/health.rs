@@ -5,9 +5,9 @@ use serde_json::{json, Value};
 use crate::{error::Result, AppState};
 
 /// 编译期注入的构建信息（由 Dockerfile ARG 传入）
-const BUILD_SHA:     &str = option_env!("BUILD_SHA")    .unwrap_or("dev");
-const BUILD_TIME:    &str = option_env!("BUILD_TIME")   .unwrap_or("unknown");
-const BUILD_VERSION: &str = option_env!("BUILD_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
+const BUILD_SHA:     &str = match option_env!("BUILD_SHA")     { Some(v) => v, None => "dev" };
+const BUILD_TIME:    &str = match option_env!("BUILD_TIME")    { Some(v) => v, None => "unknown" };
+const BUILD_VERSION: &str = match option_env!("BUILD_VERSION") { Some(v) => v, None => env!("CARGO_PKG_VERSION") };
 
 /// GET /api/health
 pub async fn health_check() -> Json<Value> {
