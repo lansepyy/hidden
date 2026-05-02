@@ -106,7 +106,7 @@ pub async fn start_scheduler(state: AppState) -> Result<()> {
 
 /// 对所有 active 分享链接进行存活检查
 async fn run_share_health_check(state: AppState) -> Result<()> {
-    let adapter = state.build_adapter().await?;;
+    let adapter = state.build_adapter().await?;
 
     let shares = sqlx::query!(
         "SELECT id, share_url, pick_code FROM shares WHERE status = 'active'"

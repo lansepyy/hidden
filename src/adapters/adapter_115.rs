@@ -190,7 +190,7 @@ impl Adapter115 {
 
             match result {
                 Ok(v) => return Ok(v),
-                Err(e) if attempt < max_retries => {
+                Err(_e) if attempt < max_retries => {
                     attempt += 1;
                     let backoff = Duration::from_secs(2u64.pow(attempt));
                     warn!("POST 失败（第 {}/{} 次重试）：等待 {}s", attempt, max_retries, backoff.as_secs());
