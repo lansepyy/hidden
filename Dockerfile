@@ -1,5 +1,5 @@
 # ─── 第一阶段：构建 ──────────────────────────────────────────────
-FROM rust:1.82-slim AS builder
+FROM rust:1-slim AS builder
 
 # 构建信息（由 CI 通过 --build-arg 注入）
 ARG BUILD_VERSION=dev
