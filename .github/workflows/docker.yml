@@ -82,13 +82,14 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/bin/sqlx
+            ~/.cargo/bin/cargo-sqlx
           key: ${{ runner.os }}-sqlx-cli-0.7-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-sqlx-cli-0.7-
 
       - name: Install sqlx-cli
         run: |
-          if ! command -v sqlx &> /dev/null; then
+          if ! command -v cargo-sqlx &> /dev/null; then
             cargo install sqlx-cli --no-default-features --features postgres --locked
           fi
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
