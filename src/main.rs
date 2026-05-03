@@ -45,13 +45,116 @@ impl AppState {
             .cloned()
     }
 
-    /// 构建 115 适配器，自动使用最新 Cookie（DB 设置 > env 变量）
+    /// 构建运行时配置快照（DB settings 非空值 > 启动时 env 配置）
+    ///
+    /// WebUI 保存的配置会进入 settings 缓存；后台任务和 API 在每次处理前
+    /// 调用该方法获取最新快照，避免必须重启服务。
+    pub async fn runtime_config(&self) -> Arc<Config> {
+        let mut config = (*self.config).clone();
+        let settings = self.settings.read().await;
+
+        fn override_string(
+            settings: &HashMap<String, String>,
+            key: &str,
+            target: &mut String,
+        ) {
+            if let Some(value) = settings.get(key).filter(|v| !v.is_empty()) {
+                *target = value.clone();
+            }
+        }
+
+        fn override_parse<T>(settings: &HashMap<String, String>, key: &str, target: &mut T)
+        where
+            T: std::str::FromStr,
+        {
+            if let Some(value) = settings.get(key).filter(|v| !v.is_empty()) {
+                if let Ok(parsed) = value.parse::<T>() {
+                    *target = parsed;
+                }
+            }
+        }
+
+        override_string(&settings, "account_115_cookie", &mut config.account_115_cookie);
+        override_string(
+            &settings,
+            "account_115_root_folder_id",
+            &mut config.account_115_root_folder_id,
+        );
+        override_string(
+            &settings,
+            "account_115_temp_folder_id",
+            &mut config.account_115_temp_folder_id,
+        );
+        override_parse(
+            &settings,
+            "account_115_request_interval_ms",
+            &mut config.account_115_request_interval_ms,
+        );
+        override_parse(
+            &settings,
+            "account_115_retry_times",
+            &mut config.account_115_retry_times,
+        );
+
+        override_string(&settings, "tmdb_api_key", &mut config.tmdb_api_key);
+        override_string(&settings, "tmdb_language", &mut config.tmdb_language);
+
+        override_parse(
+            &settings,
+            "transfer_max_size_gb",
+            &mut config.transfer_max_size_gb,
+        );
+        override_parse(
+            &settings,
+            "transfer_max_file_count",
+            &mut config.transfer_max_file_count,
+        );
+        override_parse(
+            &settings,
+            "transfer_min_free_space_gb",
+            &mut config.transfer_min_free_space_gb,
+        );
+
+        override_parse(
+            &settings,
+            "share_max_create_per_minute",
+            &mut config.share_max_create_per_minute,
+        );
+        override_parse(
+            &settings,
+            "share_max_create_per_hour",
+            &mut config.share_max_create_per_hour,
+        );
+        override_parse(
+            &settings,
+            "share_max_create_per_day",
+            &mut config.share_max_create_per_day,
+        );
+        override_parse(
+            &settings,
+            "share_min_interval_secs",
+            &mut config.share_min_interval_secs,
+        );
+        override_parse(
+            &settings,
+            "share_random_jitter_secs",
+            &mut config.share_random_jitter_secs,
+        );
+
+        override_parse(
+            &settings,
+            "clean_min_video_size_mb",
+            &mut config.clean_min_video_size_mb,
+        );
+
+        Arc::new(config)
+    }
+
+    /// 构建 115 适配器，自动使用最新 Cookie、请求间隔和重试次数（DB 设置 > env 变量）
     pub async fn build_adapter(&self) -> anyhow::Result<crate::adapters::Adapter115> {
-        let cookie = self
-            .get_setting("account_115_cookie")
-            .await
-            .unwrap_or_else(|| self.config.account_115_cookie.clone());
-        crate::adapters::Adapter115::new(&cookie, Arc::clone(&self.config))
+        let config = self.runtime_config().await;
+        let cookie = config.account_115_cookie.clone();
+        crate::adapters::Adapter115::new(&cookie, config)
     }
 }
 
@@ -97,7 +200,9 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        connected.ok_or_else(|| last_err.unwrap())?
+        connected.ok_or_else(|| {
+            last_err.unwrap_or_else(|| anyhow::anyhow!("数据库连接失败，但未捕获到具体错误"))
+        })?
     };
     // 运行数据库迁移
     sqlx::migrate!("./migrations").run(&db).await?;
@@ -111,8 +216,20 @@ async fn main() -> anyhow::Result<()> {
         for attempt in 1..=10 {
             match client.get_async_connection().await {
                 Ok(mut conn) => {
-                    match redis::cmd("PING").query_async::<_, ()>(&mut conn).await {
-                        Ok(_) => { last_err = None; break; }
+                    match redis::cmd("PING").query_async::<_, String>(&mut conn).await {
+                        Ok(pong) if pong.eq_ignore_ascii_case("PONG") => {
+                            last_err = None;
+                            break;
+                        }
+                        Ok(other) => {
+                            let e = redis::RedisError::from((
+                                redis::ErrorKind::ResponseError,
+                                "Redis PING 返回异常",
+                                other,
+                            ));
+                            tracing::warn!("Redis PING 失败（第 {}/10 次）：{}，3 秒后重试...", attempt, e);
+                            last_err = Some(e);
+                        }
                         Err(e) => {
                             tracing::warn!("Redis PING 失败（第 {}/10 次）：{}，3 秒后重试...", attempt, e);
                             last_err = Some(e);
@@ -137,14 +254,14 @@ async fn main() -> anyhow::Result<()> {
     let settings: Arc<RwLock<HashMap<String, String>>> =
         Arc::new(RwLock::new(HashMap::new()));
     {
-        let rows = sqlx::query!("SELECT key, value FROM settings")
+        let rows = sqlx::query_as::<_, (String, String)>("SELECT key, value FROM settings")
             .fetch_all(&db)
             .await
             .unwrap_or_default();
         let mut map = settings.write().await;
-        for row in rows {
-            if !row.value.is_empty() {
-                map.insert(row.key, row.value);
+        for (key, value) in rows {
+            if !value.is_empty() {
+                map.insert(key, value);
             }
         }
         info!("✅ 运行时设置已加载（{} 条非空配置）", map.len());
@@ -160,11 +277,17 @@ async fn main() -> anyhow::Result<()> {
             reload_handle_w
                 .reload(new_filter)
                 .map_err(|e| anyhow::anyhow!("更新日志级别失败: {}", e))?;
-            *current_log_level_w.write().unwrap() = s;
+            *current_log_level_w
+                .write()
+                .map_err(|_| anyhow::anyhow!("日志级别状态锁已中毒"))? = s;
             Ok(())
         });
-    let log_level_getter: Arc<dyn Fn() -> String + Send + Sync> =
-        Arc::new(move || current_log_level.read().unwrap().clone());
+    let log_level_getter: Arc<dyn Fn() -> String + Send + Sync> = Arc::new(move || {
+        current_log_level
+            .read()
+            .map(|level| level.clone())
+            .unwrap_or_else(|_| "unknown".to_string())
+    });
 
     // 构建应用状态
     let state = AppState {

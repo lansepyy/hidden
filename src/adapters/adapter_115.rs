@@ -51,6 +51,18 @@ pub struct ShareResult {
     pub share_id: String,
 }
 
+/// 将 115 API 返回的字符串/数字 ID 统一转换为字符串。
+///
+/// 115 的部分接口会把 `fid`、`cid`、`file_id`、`pick_code` 等字段以数字返回，
+/// 如果只调用 `as_str()` 会导致 ID 丢失，后续转存、移动、分享都会失败。
+fn value_to_string(value: &Value) -> Option<String> {
+    value
+        .as_str()
+        .map(ToString::to_string)
+        .or_else(|| value.as_i64().map(|n| n.to_string()))
+        .or_else(|| value.as_u64().map(|n| n.to_string()))
+}
+
 // ─────────────────────────────────────────────
 // Adapter115
 // ─────────────────────────────────────────────
@@ -224,12 +236,14 @@ impl Adapter115 {
         let limit: usize = 1000;
 
         loop {
+            let limit_str = limit.to_string();
+            let offset_str = offset.to_string();
             let params = [
                 ("share_code", share_code),
                 ("receive_code", receive_code.unwrap_or("")),
                 ("cid", "0"),
-                ("limit", &limit.to_string()),
-                ("offset", &offset.to_string()),
+                ("limit", limit_str.as_str()),
+                ("offset", offset_str.as_str()),
             ];
 
             let resp = self.get_with_retry(&url, &params).await?;
@@ -245,13 +259,18 @@ impl Adapter115 {
             let count = data["count"].as_u64().unwrap_or(0) as usize;
 
             for f in &files {
+                let is_dir = f["ico"].as_str() == Some("folder") || f["is_dir"].as_i64().unwrap_or(0) == 1;
+                let file_id = value_to_string(&f["fid"])
+                    .or_else(|| value_to_string(&f["file_id"]))
+                    .or_else(|| if is_dir { value_to_string(&f["cid"]) } else { None });
+
                 all_files.push(FileEntry {
                     name: f["n"].as_str().or_else(|| f["file_name"].as_str()).unwrap_or("").to_string(),
                     size: f["s"].as_i64().or_else(|| f["file_size"].as_i64()).unwrap_or(0),
                     path: f["n"].as_str().or_else(|| f["file_name"].as_str()).unwrap_or("").to_string(),
-                    is_dir: f["ico"].as_str() == Some("folder") || f["is_dir"].as_i64().unwrap_or(0) == 1,
-                    file_id: f["fid"].as_str().or_else(|| f["file_id"].as_str()).map(|s| s.to_string()),
-                    pick_code: f["pc"].as_str().or_else(|| f["pick_code"].as_str()).map(|s| s.to_string()),
+                    is_dir,
+                    file_id,
+                    pick_code: value_to_string(&f["pc"]).or_else(|| value_to_string(&f["pick_code"])),
                 });
             }
 
@@ -305,7 +324,10 @@ impl Adapter115 {
             bail!("创建文件夹失败：{}", resp["msg"].as_str().unwrap_or("unknown"));
         }
 
-        let folder_id = resp["data"]["file_id"].as_str().or_else(|| resp["data"]["cid"].as_str()).unwrap_or("").to_string();
+        let folder_id = value_to_string(&resp["data"]["file_id"])
+            .or_else(|| value_to_string(&resp["data"]["cid"]))
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| anyhow::anyhow!("创建文件夹成功但响应缺少文件夹 ID：{}", resp))?;
         info!("📁 创建文件夹 '{}' → cid={}", name, folder_id);
         Ok(folder_id)
     }
@@ -368,14 +390,34 @@ impl Adapter115 {
         let resp = self.get_with_retry(&url, &params).await?;
         let data_arr = resp["data"].as_array().cloned().unwrap_or_default();
 
-        let entries: Vec<FileEntry> = data_arr.iter().map(|f| FileEntry {
-            name: f["n"].as_str().or_else(|| f["file_name"].as_str()).unwrap_or("").to_string(),
-            size: f["s"].as_i64().or_else(|| f["file_size"].as_i64()).unwrap_or(0),
-            path: f["n"].as_str().or_else(|| f["file_name"].as_str()).unwrap_or("").to_string(),
-            is_dir: f["ico"].as_str() == Some("folder") || f["is_dir"].as_i64().unwrap_or(0) == 1,
-            file_id: f["fid"].as_str().or_else(|| f["file_id"].as_str()).map(|s| s.to_string()),
-            pick_code: f["pc"].as_str().or_else(|| f["pick_code"].as_str()).map(|s| s.to_string()),
-        }).collect();
+        let entries: Vec<FileEntry> = data_arr
+            .iter()
+            .map(|f| {
+                let is_dir =
+                    f["ico"].as_str() == Some("folder") || f["is_dir"].as_i64().unwrap_or(0) == 1;
+                let file_id = value_to_string(&f["fid"])
+                    .or_else(|| value_to_string(&f["file_id"]))
+                    .or_else(|| if is_dir { value_to_string(&f["cid"]) } else { None });
+
+                FileEntry {
+                    name: f["n"]
+                        .as_str()
+                        .or_else(|| f["file_name"].as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    size: f["s"].as_i64().or_else(|| f["file_size"].as_i64()).unwrap_or(0),
+                    path: f["n"]
+                        .as_str()
+                        .or_else(|| f["file_name"].as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    is_dir,
+                    file_id,
+                    pick_code: value_to_string(&f["pc"])
+                        .or_else(|| value_to_string(&f["pick_code"])),
+                }
+            })
+            .collect();
 
         info!("📂 列举目录 {} 完成：{} 个条目", cid, entries.len());
         Ok(entries)
@@ -400,8 +442,10 @@ impl Adapter115 {
         }
 
         let data = &resp["data"];
-        let share_code = data["share_code"].as_str().unwrap_or("").to_string();
-        let receive_code = data["receive_code"].as_str().unwrap_or("").to_string();
+        let share_code = value_to_string(&data["share_code"])
+            .filter(|code| !code.is_empty())
+            .ok_or_else(|| anyhow::anyhow!("创建分享成功但响应缺少 share_code：{}", resp))?;
+        let receive_code = value_to_string(&data["receive_code"]).unwrap_or_default();
 
         info!("🔗 创建分享链接 → 115.com/s/{}", share_code);
 

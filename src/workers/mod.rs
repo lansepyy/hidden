@@ -108,8 +108,8 @@ pub async fn start_scheduler(state: AppState) -> Result<()> {
 async fn run_share_health_check(state: AppState) -> Result<()> {
     let adapter = state.build_adapter().await?;
 
-    let shares = sqlx::query!(
-        "SELECT id, share_url, pick_code FROM shares WHERE status = 'active'"
+    let shares = sqlx::query_as::<_, (i64, String, Option<String>)>(
+        "SELECT id, share_url, pick_code FROM shares WHERE status = 'active'",
     )
     .fetch_all(&state.db)
     .await?;
@@ -118,32 +118,35 @@ async fn run_share_health_check(state: AppState) -> Result<()> {
 
     for share in shares {
         // 从 share_url 中提取 share_id（格式：https://115.com/s/{id}）
-        let share_id = share
-            .share_url
-            .split("/s/")
-            .last()
-            .unwrap_or("")
-            .to_string();
+        let share_id = match extract_share_id(&share.1) {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::warn!("分享 #{} URL 无效，标记为失效：{}", share.0, e);
+                String::new()
+            }
+        };
 
-        let alive = adapter
-            .verify_share(&share_id, share.pick_code.as_deref())
-            .await
-            .unwrap_or(false);
+        let alive = if share_id.is_empty() {
+            false
+        } else {
+            adapter
+                .verify_share(&share_id, share.2.as_deref())
+                .await
+                .unwrap_or(false)
+        };
 
         let new_status = if alive { "active" } else { "inactive" };
         let now = chrono::Utc::now();
 
-        sqlx::query!(
-            "UPDATE shares SET status = $1, last_checked_at = $2 WHERE id = $3",
-            new_status,
-            now,
-            share.id,
-        )
-        .execute(&state.db)
-        .await?;
+        sqlx::query("UPDATE shares SET status = $1, last_checked_at = $2 WHERE id = $3")
+            .bind(new_status)
+            .bind(now)
+            .bind(share.0)
+            .execute(&state.db)
+            .await?;
 
         if !alive {
-            info!("⚠️  分享 #{} 已失效", share.id);
+            info!("⚠️  分享 #{} 已失效", share.0);
         }
     }
 
@@ -174,12 +177,26 @@ async fn run_quota_check(state: AppState) -> Result<()> {
     Ok(())
 }
 
+fn extract_share_id(url: &str) -> Result<String> {
+    let (_, tail) = url
+        .split_once("/s/")
+        .ok_or_else(|| anyhow::anyhow!("无效的 115 分享 URL：{}", url))?;
+
+    tail.split(['?', '#'])
+        .next()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+        .ok_or_else(|| anyhow::anyhow!("无效的 115 分享 URL：{}", url))
+}
+
 /// 清理 115 中设定的临时文件夹
 async fn run_temp_cleanup(state: AppState) -> Result<()> {
     // 目前仅记录日志，具体清理逻辑留待扩展
+    let runtime_config = state.runtime_config().await;
     info!(
         "🗑️  临时清理开始（临时目录 ID: {}）",
-        state.config.account_115_temp_folder_id
+        runtime_config.account_115_temp_folder_id
     );
     Ok(())
 }

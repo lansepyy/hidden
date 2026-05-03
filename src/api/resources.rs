@@ -92,23 +92,21 @@ pub async fn list_resources(
     // 动态查询：支持关键词、类型、年份过滤
     let keyword = q.keyword.as_deref().map(|s| format!("%{}%", s));
 
-    let total: i64 = sqlx::query_scalar!(
+    let total = sqlx::query_scalar::<_, i64>(
         r#"
         SELECT COUNT(*) FROM resources
         WHERE ($1::text IS NULL OR title ILIKE $1 OR original_title ILIKE $1)
           AND ($2::text IS NULL OR resource_type = $2)
           AND ($3::int IS NULL OR year = $3)
         "#,
-        keyword,
-        q.resource_type,
-        q.year,
     )
+    .bind(keyword.as_deref())
+    .bind(q.resource_type.as_deref())
+    .bind(q.year)
     .fetch_one(&state.db)
-    .await?
-    .unwrap_or(0);
+    .await?;
 
-    let rows = sqlx::query_as!(
-        Resource,
+    let rows = sqlx::query_as::<_, Resource>(
         r#"
         SELECT id, title, original_title, year, resource_type,
                tmdb_id, imdb_id, overview, poster_url, backdrop_url,
@@ -120,12 +118,12 @@ pub async fn list_resources(
         ORDER BY created_at DESC
         LIMIT $4 OFFSET $5
         "#,
-        keyword,
-        q.resource_type,
-        q.year,
-        limit,
-        skip,
     )
+    .bind(keyword.as_deref())
+    .bind(q.resource_type.as_deref())
+    .bind(q.year)
+    .bind(limit)
+    .bind(skip)
     .fetch_all(&state.db)
     .await?;
 
@@ -142,16 +140,15 @@ pub async fn get_resource(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<ResourceResponse>> {
-    let resource = sqlx::query_as!(
-        Resource,
+    let resource = sqlx::query_as::<_, Resource>(
         r#"
         SELECT id, title, original_title, year, resource_type,
                tmdb_id, imdb_id, overview, poster_url, backdrop_url,
                status, created_at, updated_at
         FROM resources WHERE id = $1
         "#,
-        id
     )
+    .bind(id)
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| AppError::NotFound(format!("资源 #{} 不存在", id)))?;
@@ -165,15 +162,15 @@ pub async fn get_resource_shares(
     Path(id): Path<i64>,
 ) -> Result<Json<Vec<Share>>> {
     // 确认资源存在
-    let exists = sqlx::query_scalar!("SELECT 1 FROM resources WHERE id = $1", id)
+    let exists = sqlx::query_scalar::<_, i32>("SELECT 1 FROM resources WHERE id = $1")
+        .bind(id)
         .fetch_optional(&state.db)
         .await?;
     if exists.is_none() {
         return Err(AppError::NotFound(format!("资源 #{} 不存在", id)));
     }
 
-    let shares = sqlx::query_as!(
-        Share,
+    let shares = sqlx::query_as::<_, Share>(
         r#"
         SELECT id, resource_id, share_url, pick_code, share_code,
                share_title, share_type, file_count, total_size,
@@ -181,8 +178,8 @@ pub async fn get_resource_shares(
         FROM shares WHERE resource_id = $1 AND status = 'active'
         ORDER BY created_at DESC
         "#,
-        id
     )
+    .bind(id)
     .fetch_all(&state.db)
     .await?;
 
@@ -194,8 +191,7 @@ pub async fn get_resource_files(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<Vec<ResourceFile>>> {
-    let files = sqlx::query_as!(
-        ResourceFile,
+    let files = sqlx::query_as::<_, ResourceFile>(
         r#"
         SELECT id, resource_id, file_name, file_path, file_size,
                file_ext, media_type, season, episode, quality,
@@ -204,8 +200,8 @@ pub async fn get_resource_files(
         FROM resource_files WHERE resource_id = $1
         ORDER BY season NULLS LAST, episode NULLS LAST, file_name
         "#,
-        id
     )
+    .bind(id)
     .fetch_all(&state.db)
     .await?;
 

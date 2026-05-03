@@ -111,21 +111,19 @@ pub async fn create_task(
     // 自动从 URL 的 ?password= 或 &password= 参数提取提取码（pick_code）
     // 示例：https://115cdn.com/s/swwshg73wrb?password=jbe0
     let pick_code = req.pick_code.clone().or_else(|| {
-        raw_url
-            .split_once('?')
-            .and_then(|(_, qs)| {
-                qs.split('&').find_map(|pair| {
-                    let (k, v) = pair.split_once('=')?;
-                    if k == "password" && !v.is_empty() {
-                        Some(v.to_string())
-                    } else {
-                        None
-                    }
-                })
+        raw_url.split_once('?').and_then(|(_, qs)| {
+            qs.split('&').find_map(|pair| {
+                let (k, v) = pair.split_once('=')?;
+                if k == "password" && !v.is_empty() {
+                    Some(v.to_string())
+                } else {
+                    None
+                }
             })
+        })
     });
 
-    // 存入数据库时移除 URL 中的 password 参数（避免泰露）
+    // 存入数据库时移除 URL 中的 password 参数（避免泄露）
     let clean_url = raw_url
         .split_once('?')
         .map(|(base, qs)| {
@@ -141,8 +139,7 @@ pub async fn create_task(
         })
         .unwrap_or(raw_url);
 
-    let task = sqlx::query_as!(
-        ImportTask,
+    let task = sqlx::query_as::<_, ImportTask>(
         r#"
         INSERT INTO import_tasks
             (source_share_url, source_pick_code, status, priority, category, remark)
@@ -152,12 +149,12 @@ pub async fn create_task(
             total_size, total_files, current_step, error_message,
             priority, category, remark, created_at, updated_at
         "#,
-        clean_url,
-        pick_code,
-        req.priority,
-        req.category,
-        req.remark,
     )
+    .bind(clean_url)
+    .bind(pick_code)
+    .bind(req.priority)
+    .bind(req.category)
+    .bind(req.remark)
     .fetch_one(&state.db)
     .await?;
 
@@ -180,24 +177,19 @@ pub async fn list_tasks(
 
     // 汇总总数
     let total: i64 = if let Some(ref status) = q.status {
-        sqlx::query_scalar!(
-            "SELECT COUNT(*) FROM import_tasks WHERE status = $1",
-            status
-        )
-        .fetch_one(&state.db)
-        .await?
-        .unwrap_or(0)
-    } else {
-        sqlx::query_scalar!("SELECT COUNT(*) FROM import_tasks")
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM import_tasks WHERE status = $1")
+            .bind(status)
             .fetch_one(&state.db)
             .await?
-            .unwrap_or(0)
+    } else {
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM import_tasks")
+            .fetch_one(&state.db)
+            .await?
     };
 
     // 查询分页数据
     let tasks: Vec<ImportTask> = if let Some(ref status) = q.status {
-        sqlx::query_as!(
-            ImportTask,
+        sqlx::query_as::<_, ImportTask>(
             r#"
             SELECT id, source_share_url, source_pick_code, status,
                    total_size, total_files, current_step, error_message,
@@ -207,15 +199,14 @@ pub async fn list_tasks(
             ORDER BY priority DESC, created_at DESC
             LIMIT $2 OFFSET $3
             "#,
-            status,
-            limit,
-            skip
         )
+        .bind(status)
+        .bind(limit)
+        .bind(skip)
         .fetch_all(&state.db)
         .await?
     } else {
-        sqlx::query_as!(
-            ImportTask,
+        sqlx::query_as::<_, ImportTask>(
             r#"
             SELECT id, source_share_url, source_pick_code, status,
                    total_size, total_files, current_step, error_message,
@@ -224,9 +215,9 @@ pub async fn list_tasks(
             ORDER BY priority DESC, created_at DESC
             LIMIT $1 OFFSET $2
             "#,
-            limit,
-            skip
         )
+        .bind(limit)
+        .bind(skip)
         .fetch_all(&state.db)
         .await?
     };
@@ -245,16 +236,15 @@ pub async fn get_task(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<TaskResponse>> {
-    let task = sqlx::query_as!(
-        ImportTask,
+    let task = sqlx::query_as::<_, ImportTask>(
         r#"
         SELECT id, source_share_url, source_pick_code, status,
                total_size, total_files, current_step, error_message,
                priority, category, remark, created_at, updated_at
         FROM import_tasks WHERE id = $1
         "#,
-        id
     )
+    .bind(id)
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| AppError::NotFound(format!("任务 #{} 不存在", id)))?;
@@ -268,16 +258,15 @@ pub async fn retry_task(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>> {
-    let task = sqlx::query_as!(
-        ImportTask,
+    let task = sqlx::query_as::<_, ImportTask>(
         r#"
         SELECT id, source_share_url, source_pick_code, status,
                total_size, total_files, current_step, error_message,
                priority, category, remark, created_at, updated_at
         FROM import_tasks WHERE id = $1
         "#,
-        id
     )
+    .bind(id)
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| AppError::NotFound(format!("任务 #{} 不存在", id)))?;
@@ -289,10 +278,10 @@ pub async fn retry_task(
         )));
     }
 
-    sqlx::query!(
+    sqlx::query(
         "UPDATE import_tasks SET status = 'pending', error_message = NULL, current_step = NULL WHERE id = $1",
-        id
     )
+    .bind(id)
     .execute(&state.db)
     .await?;
 
@@ -313,10 +302,10 @@ pub async fn cancel_task(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>> {
-    let result = sqlx::query!(
+    let result = sqlx::query(
         "UPDATE import_tasks SET status = 'skipped' WHERE id = $1 AND status = 'pending'",
-        id
     )
+    .bind(id)
     .execute(&state.db)
     .await?;
 

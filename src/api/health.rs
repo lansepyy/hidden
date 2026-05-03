@@ -23,39 +23,32 @@ pub async fn health_check() -> Json<Value> {
 
 /// GET /api/stats  —  仪表盘统计数据
 pub async fn get_stats(State(state): State<AppState>) -> Result<Json<Value>> {
-    let resources = sqlx::query_scalar!("SELECT COUNT(*) FROM resources")
+    let resources = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM resources")
         .fetch_one(&state.db)
-        .await?
-        .unwrap_or(0);
+        .await?;
 
-    let shares_total = sqlx::query_scalar!("SELECT COUNT(*) FROM shares")
+    let shares_total = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM shares")
         .fetch_one(&state.db)
-        .await?
-        .unwrap_or(0);
+        .await?;
 
-    let shares_active = sqlx::query_scalar!("SELECT COUNT(*) FROM shares WHERE status = 'active'")
+    let shares_active =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM shares WHERE status = 'active'")
+            .fetch_one(&state.db)
+            .await?;
+
+    let tasks_total = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM import_tasks")
         .fetch_one(&state.db)
-        .await?
-        .unwrap_or(0);
+        .await?;
 
-    let tasks_total = sqlx::query_scalar!("SELECT COUNT(*) FROM import_tasks")
-        .fetch_one(&state.db)
-        .await?
-        .unwrap_or(0);
+    let tasks_pending =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM import_tasks WHERE status = 'pending'")
+            .fetch_one(&state.db)
+            .await?;
 
-    let tasks_pending = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM import_tasks WHERE status = 'pending'"
-    )
-    .fetch_one(&state.db)
-    .await?
-    .unwrap_or(0);
-
-    let tasks_failed = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM import_tasks WHERE status = 'failed'"
-    )
-    .fetch_one(&state.db)
-    .await?
-    .unwrap_or(0);
+    let tasks_failed =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM import_tasks WHERE status = 'failed'")
+            .fetch_one(&state.db)
+            .await?;
 
     Ok(Json(json!({
         "resources": resources,
@@ -74,29 +67,40 @@ pub async fn get_stats(State(state): State<AppState>) -> Result<Json<Value>> {
 
 /// GET /api/logs  —  最近任务活动流水（用于 WebUI 日志页）
 pub async fn get_logs(State(state): State<AppState>) -> Result<Json<serde_json::Value>> {
-    let rows = sqlx::query!(
+    let rows = sqlx::query_as::<
+        _,
+        (
+            i64,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            chrono::DateTime<Utc>,
+            chrono::DateTime<Utc>,
+        ),
+    >(
         r#"
         SELECT id, source_share_url, status, current_step, error_message,
                created_at, updated_at
         FROM import_tasks
         ORDER BY updated_at DESC
         LIMIT 200
-        "#
+        "#,
     )
     .fetch_all(&state.db)
     .await?;
 
     let entries: Vec<serde_json::Value> = rows
-        .iter()
+        .into_iter()
         .map(|r| {
             serde_json::json!({
-                "task_id":   r.id,
-                "url":       r.source_share_url,
-                "status":    r.status,
-                "step":      r.current_step,
-                "error":     r.error_message,
-                "created_at": r.created_at,
-                "updated_at": r.updated_at,
+                "task_id":   r.0,
+                "url":       r.1,
+                "status":    r.2,
+                "step":      r.3,
+                "error":     r.4,
+                "created_at": r.5,
+                "updated_at": r.6,
             })
         })
         .collect();

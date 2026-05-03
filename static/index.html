@@ -390,13 +390,13 @@ tr:hover td { background: rgba(28,33,40,.6); }
         </div>
         <div>
           <label class="form-label">每小时最多创建</label>
-          <input id="s-share_max_create_per_hour" class="form-control" type="number" placeholder="20">
+          <input id="s-share_max_create_per_hour" class="form-control" type="number" placeholder="60">
         </div>
       </div>
       <div class="settings-row">
         <div>
           <label class="form-label">每天最多创建</label>
-          <input id="s-share_max_create_per_day" class="form-control" type="number" placeholder="100">
+          <input id="s-share_max_create_per_day" class="form-control" type="number" placeholder="300">
         </div>
         <div>
           <label class="form-label">最小间隔 (秒)</label>
@@ -406,7 +406,7 @@ tr:hover td { background: rgba(28,33,40,.6); }
       <div class="settings-row">
         <div>
           <label class="form-label">随机抖动幅度 (秒)</label>
-          <input id="s-share_random_jitter_secs" class="form-control" type="number" placeholder="15">
+          <input id="s-share_random_jitter_secs" class="form-control" type="number" placeholder="10">
         </div>
         <div></div>
       </div>
@@ -421,7 +421,17 @@ tr:hover td { background: rgba(28,33,40,.6); }
         </div>
         <div>
           <label class="form-label">转存前最小剩余空间 (GB)</label>
-          <input id="s-transfer_min_free_space_gb" class="form-control" type="number" placeholder="50">
+          <input id="s-transfer_min_free_space_gb" class="form-control" type="number" placeholder="20">
+        </div>
+      </div>
+      <div class="settings-row">
+        <div>
+          <label class="form-label">单次转存最大大小 (GB)</label>
+          <input id="s-transfer_max_size_gb" class="form-control" type="number" placeholder="80">
+        </div>
+        <div>
+          <label class="form-label">单次转存最多文件数</label>
+          <input id="s-transfer_max_file_count" class="form-control" type="number" placeholder="200">
         </div>
       </div>
     </div>
@@ -875,7 +885,8 @@ async function saveSettings() {
     'tmdb_api_key','tmdb_language',
     'share_max_create_per_minute','share_max_create_per_hour','share_max_create_per_day',
     'share_min_interval_secs','share_random_jitter_secs',
-    'clean_min_video_size_mb','transfer_min_free_space_gb'
+    'clean_min_video_size_mb','transfer_min_free_space_gb',
+    'transfer_max_size_gb','transfer_max_file_count'
   ];
   const settings = {};
   keys.forEach(k => {

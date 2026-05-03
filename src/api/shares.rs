@@ -37,21 +37,22 @@ pub async fn list_shares(
     State(state): State<AppState>,
     Query(params): Query<ListSharesQuery>,
 ) -> Result<Json<serde_json::Value>> {
+    let limit = params.limit.min(100).max(1);
+    let skip = params.skip.max(0);
+
     let total: i64 = if let Some(ref status) = params.status {
-        sqlx::query_scalar!("SELECT COUNT(*) FROM shares WHERE status = $1", status)
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM shares WHERE status = $1")
+            .bind(status)
             .fetch_one(&state.db)
             .await?
-            .unwrap_or(0)
     } else {
-        sqlx::query_scalar!("SELECT COUNT(*) FROM shares")
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM shares")
             .fetch_one(&state.db)
             .await?
-            .unwrap_or(0)
     };
 
     let rows: Vec<Share> = if let Some(ref status) = params.status {
-        sqlx::query_as!(
-            Share,
+        sqlx::query_as::<_, Share>(
             r#"
             SELECT id, resource_id, share_url, pick_code, share_code,
                    share_title, share_type, file_count, total_size,
@@ -61,15 +62,14 @@ pub async fn list_shares(
             ORDER BY created_at DESC
             LIMIT $2 OFFSET $3
             "#,
-            status,
-            params.limit,
-            params.skip
         )
+        .bind(status)
+        .bind(limit)
+        .bind(skip)
         .fetch_all(&state.db)
         .await?
     } else {
-        sqlx::query_as!(
-            Share,
+        sqlx::query_as::<_, Share>(
             r#"
             SELECT id, resource_id, share_url, pick_code, share_code,
                    share_title, share_type, file_count, total_size,
@@ -78,17 +78,17 @@ pub async fn list_shares(
             ORDER BY created_at DESC
             LIMIT $1 OFFSET $2
             "#,
-            params.limit,
-            params.skip
         )
+        .bind(limit)
+        .bind(skip)
         .fetch_all(&state.db)
         .await?
     };
 
     Ok(Json(serde_json::json!({
         "total": total,
-        "skip": params.skip,
-        "limit": params.limit,
+        "skip": skip,
+        "limit": limit,
         "items": rows
     })))
 }
@@ -97,20 +97,16 @@ pub async fn list_shares(
 // GET /api/shares/:id
 // ─────────────────────────────────────────────
 
-pub async fn get_share(
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
-) -> Result<Json<Share>> {
-    let share = sqlx::query_as!(
-        Share,
+pub async fn get_share(State(state): State<AppState>, Path(id): Path<i64>) -> Result<Json<Share>> {
+    let share = sqlx::query_as::<_, Share>(
         r#"
         SELECT id, resource_id, share_url, pick_code, share_code,
                share_title, share_type, file_count, total_size,
                status, last_checked_at, created_at
         FROM shares WHERE id = $1
         "#,
-        id
     )
+    .bind(id)
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| AppError::NotFound(format!("分享 #{} 不存在", id)))?;
@@ -126,16 +122,15 @@ pub async fn check_share(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>> {
-    let share = sqlx::query_as!(
-        Share,
+    let share = sqlx::query_as::<_, Share>(
         r#"
         SELECT id, resource_id, share_url, pick_code, share_code,
                share_title, share_type, file_count, total_size,
                status, last_checked_at, created_at
         FROM shares WHERE id = $1
         "#,
-        id
     )
+    .bind(id)
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| AppError::NotFound(format!("分享 #{} 不存在", id)))?;
@@ -147,10 +142,7 @@ pub async fn check_share(
     };
 
     // 使用运行时 Cookie（支持 WebUI 热更新）
-    let adapter = state
-        .build_adapter()
-        .await
-        .map_err(AppError::Internal)?;
+    let adapter = state.build_adapter().await.map_err(AppError::Internal)?;
 
     let alive = adapter
         .verify_share(&share_code, share.pick_code.as_deref())
@@ -160,14 +152,12 @@ pub async fn check_share(
     let new_status = if alive { "active" } else { "inactive" };
     let now = Utc::now();
 
-    sqlx::query!(
-        "UPDATE shares SET status = $1, last_checked_at = $2 WHERE id = $3",
-        new_status,
-        now,
-        id
-    )
-    .execute(&state.db)
-    .await?;
+    sqlx::query("UPDATE shares SET status = $1, last_checked_at = $2 WHERE id = $3")
+        .bind(new_status)
+        .bind(now)
+        .bind(id)
+        .execute(&state.db)
+        .await?;
 
     tracing::info!("🔍 分享 #{} 检查：{} → {}", id, share.status, new_status);
 
@@ -189,41 +179,33 @@ pub async fn rebuild_share(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>> {
-    let share = sqlx::query_as!(
-        Share,
+    let share = sqlx::query_as::<_, Share>(
         r#"
         SELECT id, resource_id, share_url, pick_code, share_code,
                share_title, share_type, file_count, total_size,
                status, last_checked_at, created_at
         FROM shares WHERE id = $1
         "#,
-        id
     )
+    .bind(id)
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| AppError::NotFound(format!("分享 #{} 不存在", id)))?;
 
     if share.status == "active" {
-        return Err(AppError::BadRequest(
-            "分享链接仍然有效，无需重建".to_string(),
-        ));
+        return Err(AppError::BadRequest("分享链接仍然有效，无需重建".to_string()));
     }
 
     let resource_id = share.resource_id.ok_or_else(|| {
-        AppError::BadRequest(
-            "分享未关联资源，无法自动重建（请重新提交导入任务）".to_string(),
-        )
+        AppError::BadRequest("分享未关联资源，无法自动重建（请重新提交导入任务）".to_string())
     })?;
 
-    let cloud_ids: Vec<String> = sqlx::query_scalar!(
+    let cloud_ids: Vec<String> = sqlx::query_scalar::<_, String>(
         "SELECT cloud_file_id FROM resource_files WHERE resource_id = $1 AND cloud_file_id IS NOT NULL",
-        resource_id
     )
+    .bind(resource_id)
     .fetch_all(&state.db)
-    .await?
-    .into_iter()
-    .flatten()
-    .collect();
+    .await?;
 
     if cloud_ids.is_empty() {
         return Err(AppError::BadRequest(
@@ -231,11 +213,12 @@ pub async fn rebuild_share(
         ));
     }
 
+    let runtime_config = state.runtime_config().await;
     let allowed = check_share_rate(
         &state.redis,
-        state.config.share_max_create_per_minute,
-        state.config.share_max_create_per_hour,
-        state.config.share_max_create_per_day,
+        runtime_config.share_max_create_per_minute,
+        runtime_config.share_max_create_per_hour,
+        runtime_config.share_max_create_per_day,
     )
     .await
     .unwrap_or(true);
@@ -244,16 +227,14 @@ pub async fn rebuild_share(
         return Err(AppError::RateLimited);
     }
 
-    let jitter = rand::random::<u64>() % (state.config.share_random_jitter_secs * 1000 + 1);
+    let jitter =
+        rand::random::<u64>() % (runtime_config.share_random_jitter_secs * 1000 + 1);
     tokio::time::sleep(tokio::time::Duration::from_millis(
-        state.config.share_min_interval_secs * 1000 + jitter,
+        runtime_config.share_min_interval_secs * 1000 + jitter,
     ))
     .await;
 
-    let adapter = state
-        .build_adapter()
-        .await
-        .map_err(AppError::Internal)?;
+    let adapter = state.build_adapter().await.map_err(AppError::Internal)?;
 
     let id_refs: Vec<&str> = cloud_ids.iter().map(|s| s.as_str()).collect();
     let new_share = adapter
@@ -265,19 +246,19 @@ pub async fn rebuild_share(
 
     let now = Utc::now();
 
-    sqlx::query!(
+    sqlx::query(
         r#"
         UPDATE shares
         SET share_url = $1, pick_code = $2, share_code = $3,
             status = 'active', last_checked_at = $4
         WHERE id = $5
         "#,
-        new_share.share_url,
-        new_share.pick_code,
-        new_share.share_id,
-        now,
-        id
     )
+    .bind(&new_share.share_url)
+    .bind(&new_share.pick_code)
+    .bind(&new_share.share_id)
+    .bind(now)
+    .bind(id)
     .execute(&state.db)
     .await?;
 
@@ -297,10 +278,14 @@ pub async fn rebuild_share(
 // ─────────────────────────────────────────────
 
 fn extract_share_id_from_url(url: &str) -> Result<String> {
-    url.split("/s/")
-        .last()
-        .map(|s| s.split('?').next().unwrap_or(s).trim().to_string())
+    let (_, tail) = url
+        .split_once("/s/")
+        .ok_or_else(|| AppError::BadRequest(format!("无法从 URL 提取分享 ID：{}", url)))?;
+
+    tail.split(['?', '#'])
+        .next()
+        .map(str::trim)
         .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
         .ok_or_else(|| AppError::BadRequest(format!("无法从 URL 提取分享 ID：{}", url)))
 }
-

@@ -1,7 +1,4 @@
-use axum::{
-    extract::State,
-    Json,
-};
+use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::info;
@@ -15,7 +12,7 @@ use crate::{
 // 响应类型
 // ─────────────────────────────────────────────
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct SettingItem {
     pub key: String,
     pub value: String,
@@ -27,12 +24,9 @@ pub struct SettingItem {
 // GET /api/settings  →  所有配置项列表
 // ─────────────────────────────────────────────
 
-pub async fn list_settings(
-    State(state): State<AppState>,
-) -> Result<Json<Vec<SettingItem>>> {
-    let rows = sqlx::query_as!(
-        SettingItem,
-        "SELECT key, value, description, updated_at FROM settings ORDER BY key"
+pub async fn list_settings(State(state): State<AppState>) -> Result<Json<Vec<SettingItem>>> {
+    let rows = sqlx::query_as::<_, SettingItem>(
+        "SELECT key, value, description, updated_at FROM settings ORDER BY key",
     )
     .fetch_all(&state.db)
     .await?;
@@ -56,26 +50,26 @@ pub async fn update_settings(
     let mut updated = 0usize;
 
     for (key, value) in &body.settings {
-        sqlx::query!(
+        sqlx::query(
             r#"
             INSERT INTO settings (key, value)
             VALUES ($1, $2)
             ON CONFLICT (key) DO UPDATE
                 SET value = EXCLUDED.value, updated_at = NOW()
             "#,
-            key,
-            value,
         )
+        .bind(key)
+        .bind(value)
         .execute(&state.db)
         .await
         .map_err(AppError::Database)?;
 
         // 同步到内存缓存（使 cookie 等立即生效，无需重启）
-        state
-            .settings
-            .write()
-            .await
-            .insert(key.clone(), value.clone());
+        if value.is_empty() {
+            state.settings.write().await.remove(key);
+        } else {
+            state.settings.write().await.insert(key.clone(), value.clone());
+        }
 
         updated += 1;
     }
