@@ -72,7 +72,10 @@ pub struct Adapter115 {
 }
 
 impl Adapter115 {
-    const BASE_URL: &'static str = "https://115.com";
+    /// 分享/文件基础操作（webapi）
+    const WEBAPI: &'static str = "https://webapi.115.com";
+    /// 文件管理 open 接口（proapi）
+    const PROAPI: &'static str = "https://proapi.115.com";
 
     /// 构建适配器实例
     pub fn new(cookie: &str, config: Arc<Config>) -> anyhow::Result<Self> {
@@ -206,9 +209,10 @@ impl Adapter115 {
     // ─────────────────────────────────────────────
 
     /// 检查 Cookie/会话是否有效
+    /// POST https://webapi.115.com/user/space_summury
     pub async fn check_session(&self) -> anyhow::Result<bool> {
-        let url = format!("{}/api/user/space", Self::BASE_URL);
-        match self.get_with_retry(&url, &[]).await {
+        let url = format!("{}/user/space_summury", Self::WEBAPI);
+        match self.post_with_retry(&url, &[]).await {
             Ok(v) if v["state"].as_bool().unwrap_or(false) => {
                 info!("✅ 115 会话有效");
                 Ok(true)
@@ -229,17 +233,25 @@ impl Adapter115 {
     // ─────────────────────────────────────────────
 
     /// 获取账号存储配额
+    /// GET https://proapi.115.com/android/user/space_info
     pub async fn get_quota(&self) -> anyhow::Result<QuotaInfo> {
-        let url = format!("{}/api/user/space", Self::BASE_URL);
+        let url = format!("{}/android/user/space_info", Self::PROAPI);
         let resp = self.get_with_retry(&url, &[]).await?;
 
-        if !resp["state"].as_bool().unwrap_or(false) {
-            bail!("获取配额失败：{}", resp["msg"].as_str().unwrap_or("unknown"));
-        }
+        // 响应可能是 {state:true, data:{rt_space_info:{...}}} 或直接包含数据
+        let data = if resp["state"].as_bool().unwrap_or(false) {
+            resp["data"].clone()
+        } else {
+            resp.clone()
+        };
 
-        let data = &resp["data"];
-        let total: i64 = data["all_total"]["size"].as_i64().unwrap_or(0);
-        let used: i64 = data["all_use"]["size"].as_i64().unwrap_or(0);
+        // 字段路径：rt_space_info.all_total.size / rt_space_info.all_use.size
+        let total = data["rt_space_info"]["all_total"]["size"].as_i64()
+            .or_else(|| data["all_total"]["size"].as_i64())
+            .unwrap_or(0);
+        let used = data["rt_space_info"]["all_use"]["size"].as_i64()
+            .or_else(|| data["all_use"]["size"].as_i64())
+            .unwrap_or(0);
 
         Ok(QuotaInfo {
             total,
@@ -253,40 +265,75 @@ impl Adapter115 {
     // ─────────────────────────────────────────────
 
     /// 解析 115 分享链接，返回完整的文件树
+    ///
+    /// GET https://webapi.115.com/share/snap
+    /// params: share_code, receive_code, cid=0, limit=1000, offset
     pub async fn parse_share(
         &self,
         share_id: &str,
         pick_code: Option<&str>,
     ) -> anyhow::Result<ShareInfo> {
-        let url = format!("{}/api/share/get", Self::BASE_URL);
-        let mut params = vec![("share_id", share_id)];
-        let code;
-        if let Some(pc) = pick_code {
-            code = pc.to_string();
-            params.push(("receive_code", &code));
+        let url = format!("{}/share/snap", Self::WEBAPI);
+        let mut all_files: Vec<FileEntry> = Vec::new();
+        let mut offset = 0usize;
+        let limit = 1000usize;
+
+        loop {
+            let offset_str = offset.to_string();
+            let limit_str = limit.to_string();
+            let receive_code_val = pick_code.unwrap_or("");
+
+            let params = [
+                ("share_code", share_id),
+                ("receive_code", receive_code_val),
+                ("cid", "0"),
+                ("limit", &limit_str),
+                ("offset", &offset_str),
+            ];
+
+            let resp = self.get_with_retry(&url, &params).await?;
+
+            if !resp["state"].as_bool().unwrap_or(false) {
+                let errno = resp["errno"].as_i64().unwrap_or(0);
+                let msg = resp["msg"].as_str().unwrap_or("unknown");
+                bail!("解析分享失败 [errno={}]：{}", errno, msg);
+            }
+
+            let data = &resp["data"];
+            let files = data["list"].as_array().cloned().unwrap_or_default();
+            let count = data["count"].as_u64().unwrap_or(0) as usize;
+
+            for f in &files {
+                all_files.push(FileEntry {
+                    name: f["n"].as_str()
+                        .or_else(|| f["file_name"].as_str())
+                        .unwrap_or("").to_string(),
+                    size: f["s"].as_i64()
+                        .or_else(|| f["file_size"].as_i64())
+                        .unwrap_or(0),
+                    path: f["n"].as_str()
+                        .or_else(|| f["file_name"].as_str())
+                        .unwrap_or("").to_string(),
+                    // ico = "folder" 表示目录
+                    is_dir: f["ico"].as_str() == Some("folder")
+                        || f["is_dir"].as_i64().unwrap_or(0) == 1,
+                    file_id: f["fid"].as_str()
+                        .or_else(|| f["file_id"].as_str())
+                        .map(|s| s.to_string()),
+                    pick_code: f["pc"].as_str()
+                        .or_else(|| f["pick_code"].as_str())
+                        .map(|s| s.to_string()),
+                });
+            }
+
+            offset += files.len();
+            if offset >= count || files.is_empty() {
+                break;
+            }
         }
 
-        let resp = self.get_with_retry(&url, &params).await?;
-
-        if !resp["state"].as_bool().unwrap_or(false) {
-            bail!("解析分享失败：{}", resp["msg"].as_str().unwrap_or("unknown"));
-        }
-
-        let files = resp["data"].as_array().cloned().unwrap_or_default();
-        let tree: Vec<FileEntry> = files
-            .iter()
-            .map(|f| FileEntry {
-                name: f["file_name"].as_str().unwrap_or("").to_string(),
-                size: f["file_size"].as_i64().unwrap_or(0),
-                path: f["file_name"].as_str().unwrap_or("").to_string(),
-                is_dir: f["is_dir"].as_bool().unwrap_or(false),
-                file_id: f["file_id"].as_str().map(|s| s.to_string()),
-                pick_code: f["pick_code"].as_str().map(|s| s.to_string()),
-            })
-            .collect();
-
-        let total_size: i64 = tree.iter().map(|f| f.size).sum();
-        let file_count = tree.iter().filter(|f| !f.is_dir).count();
+        let total_size: i64 = all_files.iter().map(|f| f.size).sum();
+        let file_count = all_files.iter().filter(|f| !f.is_dir).count();
 
         info!("📦 解析分享 {} 完成：{} 个文件，共 {} bytes", share_id, file_count, total_size);
 
@@ -294,7 +341,7 @@ impl Adapter115 {
             share_id: share_id.to_string(),
             total_size,
             file_count,
-            tree,
+            tree: all_files,
         })
     }
 
@@ -303,6 +350,9 @@ impl Adapter115 {
     // ─────────────────────────────────────────────
 
     /// 将分享文件转存到指定目录
+    ///
+    /// POST https://webapi.115.com/share/receive
+    /// data: share_code, receive_code, file_id（逗号分隔）, cid（目标目录）
     pub async fn transfer_share(
         &self,
         share_id: &str,
@@ -310,20 +360,17 @@ impl Adapter115 {
         file_ids: &[&str],
         target_folder_id: &str,
     ) -> anyhow::Result<bool> {
-        let url = format!("{}/api/share/transfer", Self::BASE_URL);
+        let url = format!("{}/share/receive", Self::WEBAPI);
         let ids = file_ids.join(",");
-        let mut form = vec![
-            ("share_id", share_id),
-            ("file_ids", &ids),
-            ("target_id", target_folder_id),
-        ];
-        let code;
-        if let Some(pc) = pick_code {
-            code = pc.to_string();
-            form.push(("receive_code", &code));
-        }
+        let receive_code_val = pick_code.unwrap_or("");
 
-        // 将 form 中的 &str 引用转为 owned String 以延长生命周期
+        let form = [
+            ("share_code", share_id),
+            ("receive_code", receive_code_val),
+            ("file_id", ids.as_str()),
+            ("cid", target_folder_id),
+        ];
+
         let owned: Vec<(String, String)> = form
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -336,23 +383,27 @@ impl Adapter115 {
         let resp = self.post_with_retry(&url, &borrowed).await?;
 
         if resp["state"].as_bool().unwrap_or(false) {
-            info!("✅ 转存完成：{} 个文件 → {}", file_ids.len(), target_folder_id);
+            info!("✅ 转存完成：{} 个文件 → cid={}", file_ids.len(), target_folder_id);
             Ok(true)
         } else {
+            let errno = resp["errno"].as_i64().unwrap_or(0);
             let msg = resp["msg"].as_str().unwrap_or("unknown").to_string();
-            error!("转存失败：{}", msg);
-            Ok(false)
+            error!("转存失败 [errno={}]：{}", errno, msg);
+            bail!("转存失败 [errno={}]：{}", errno, msg);
         }
     }
 
     /// 新建文件夹，返回新文件夹 ID
+    ///
+    /// POST https://proapi.115.com/open/folder/add
+    /// data: file_name, pid
     pub async fn create_folder(
         &self,
         parent_id: &str,
         name: &str,
     ) -> anyhow::Result<String> {
-        let url = format!("{}/api/directory/create", Self::BASE_URL);
-        let form = [("parent_id", parent_id), ("name", name)];
+        let url = format!("{}/open/folder/add", Self::PROAPI);
+        let form = [("file_name", name), ("pid", parent_id)];
         let borrowed: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, *v)).collect();
 
         let resp = self.post_with_retry(&url, &borrowed).await?;
@@ -361,24 +412,28 @@ impl Adapter115 {
             bail!("创建文件夹失败：{}", resp["msg"].as_str().unwrap_or("unknown"));
         }
 
-        let folder_id = resp["data"]["id"]
-            .as_str()
+        // 新建目录的 ID 在 data.file_id 或 data.cid
+        let folder_id = resp["data"]["file_id"].as_str()
+            .or_else(|| resp["data"]["cid"].as_str())
             .unwrap_or("")
             .to_string();
 
-        info!("📁 创建文件夹 '{}' → ID: {}", name, folder_id);
+        info!("📁 创建文件夹 '{}' → cid={}", name, folder_id);
         Ok(folder_id)
     }
 
     /// 移动文件
+    ///
+    /// POST https://proapi.115.com/open/ufile/move
+    /// data: file_ids（逗号分隔）, to_cid
     pub async fn move_files(
         &self,
         file_ids: &[&str],
         target_folder_id: &str,
     ) -> anyhow::Result<bool> {
-        let url = format!("{}/api/move", Self::BASE_URL);
+        let url = format!("{}/open/ufile/move", Self::PROAPI);
         let ids = file_ids.join(",");
-        let form = [("file_ids", ids.as_str()), ("folder_id", target_folder_id)];
+        let form = [("file_ids", ids.as_str()), ("to_cid", target_folder_id)];
         let borrowed: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, *v)).collect();
 
         let resp = self.post_with_retry(&url, &borrowed).await?;
@@ -386,13 +441,16 @@ impl Adapter115 {
     }
 
     /// 重命名文件/目录
+    ///
+    /// POST https://proapi.115.com/open/ufile/update
+    /// data: file_id, file_name
     pub async fn rename_file(
         &self,
         file_id: &str,
         new_name: &str,
     ) -> anyhow::Result<bool> {
-        let url = format!("{}/api/file/rename", Self::BASE_URL);
-        let form = [("fid", file_id), ("file_name", new_name)];
+        let url = format!("{}/open/ufile/update", Self::PROAPI);
+        let form = [("file_id", file_id), ("file_name", new_name)];
         let borrowed: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, *v)).collect();
 
         let resp = self.post_with_retry(&url, &borrowed).await?;
@@ -407,20 +465,34 @@ impl Adapter115 {
     }
 
     /// 删除文件/目录（移入回收站）
+    ///
+    /// POST https://webapi.115.com/rb/delete
+    /// data: fid[0]=x&fid[1]=y...（多文件用索引键）或 fid=x（单文件）
     pub async fn delete_files(&self, file_ids: &[&str]) -> anyhow::Result<bool> {
-        let url = format!("{}/api/delete", Self::BASE_URL);
-        let ids = file_ids.join(",");
-        let form = [("file_ids", ids.as_str())];
-        let borrowed: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, *v)).collect();
+        let url = format!("{}/rb/delete", Self::WEBAPI);
+
+        let owned: Vec<(String, String)> = if file_ids.len() == 1 {
+            vec![("fid".to_string(), file_ids[0].to_string())]
+        } else {
+            file_ids.iter().enumerate()
+                .map(|(i, id)| (format!("fid[{}]", i), id.to_string()))
+                .collect()
+        };
+        let borrowed: Vec<(&str, &str)> = owned
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
 
         let resp = self.post_with_retry(&url, &borrowed).await?;
         Ok(resp["state"].as_bool().unwrap_or(false))
     }
 
-    /// 列出指定目录下的所有文件（递归一层，不深递归）
+    /// 列出指定目录下的所有文件（不深递归）
+    ///
+    /// GET https://proapi.115.com/open/ufile/files
+    /// params: cid, limit, offset, show_dir=1
     pub async fn list_files(&self, folder_id: &str) -> anyhow::Result<Vec<FileEntry>> {
-        let url = format!("{}/api/files", Self::BASE_URL);
-        // cid=目录ID, show_dir=1 包含子目录, limit=1150 最大单页
+        let url = format!("{}/open/ufile/files", Self::PROAPI);
         let params = [
             ("cid", folder_id),
             ("show_dir", "1"),
@@ -430,44 +502,37 @@ impl Adapter115 {
 
         let resp = self.get_with_retry(&url, &params).await?;
 
-        // 115 文件列表接口有时通过 state 字段，有时不带
         let data_arr = resp["data"]
             .as_array()
             .cloned()
-            .unwrap_or_else(|| resp["list"].as_array().cloned().unwrap_or_default());
+            .unwrap_or_default();
 
         let entries: Vec<FileEntry> = data_arr
             .iter()
             .map(|f| FileEntry {
-                name: f["file_name"]
-                    .as_str()
-                    .or_else(|| f["name"].as_str())
+                name: f["n"].as_str()
+                    .or_else(|| f["file_name"].as_str())
                     .unwrap_or("")
                     .to_string(),
-                size: f["file_size"].as_i64().unwrap_or(0),
-                path: f["file_name"]
-                    .as_str()
+                size: f["s"].as_i64()
+                    .or_else(|| f["file_size"].as_i64())
+                    .unwrap_or(0),
+                path: f["n"].as_str()
+                    .or_else(|| f["file_name"].as_str())
                     .unwrap_or("")
                     .to_string(),
-                // is_dir: 1 表示目录
-                is_dir: f["is_dir"].as_i64().unwrap_or(0) == 1
-                    || f["is_dir"].as_bool().unwrap_or(false),
-                file_id: f["fid"]
-                    .as_str()
+                is_dir: f["ico"].as_str() == Some("folder")
+                    || f["is_dir"].as_i64().unwrap_or(0) == 1,
+                file_id: f["fid"].as_str()
                     .or_else(|| f["file_id"].as_str())
                     .map(|s| s.to_string()),
-                pick_code: f["pc"]
-                    .as_str()
+                pick_code: f["pc"].as_str()
                     .or_else(|| f["pick_code"].as_str())
                     .map(|s| s.to_string()),
             })
             .collect();
 
-        info!(
-            "📂 列举目录 {} 完成：{} 个条目",
-            folder_id,
-            entries.len()
-        );
+        info!("📂 列举目录 {} 完成：{} 个条目", folder_id, entries.len());
         Ok(entries)
     }
 
@@ -476,25 +541,23 @@ impl Adapter115 {
     // ─────────────────────────────────────────────
 
     /// 为指定文件/目录创建分享链接
+    ///
+    /// POST https://webapi.115.com/share/send
+    /// data: file_ids（逗号分隔）, ignore_warn=1, is_asc=1, order=file_name
     pub async fn create_share(
         &self,
         file_ids: &[&str],
-        title: Option<&str>,
-        duration_days: u32,
+        _title: Option<&str>,
+        _duration_days: u32,
     ) -> anyhow::Result<ShareResult> {
-        let url = format!("{}/api/share/send", Self::BASE_URL);
+        let url = format!("{}/share/send", Self::WEBAPI);
         let ids = file_ids.join(",");
-        let duration_str = duration_days.to_string();
-        let mut form: Vec<(&str, &str)> = vec![
-            ("file_ids", &ids),
-            ("expire", &duration_str),
+        let form = [
+            ("file_ids", ids.as_str()),
+            ("ignore_warn", "1"),
+            ("is_asc", "1"),
+            ("order", "file_name"),
         ];
-        let t;
-        if let Some(title_str) = title {
-            t = title_str.to_string();
-            form.push(("title", &t));
-        }
-
         let owned: Vec<(String, String)> = form
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -511,15 +574,17 @@ impl Adapter115 {
         }
 
         let data = &resp["data"];
-        let link_id = data["link_id"].as_str().unwrap_or("").to_string();
-        let pick = data["code"].as_str().unwrap_or("").to_string();
+        // share_code 是分享码（URL 路径部分）
+        let share_code = data["share_code"].as_str().unwrap_or("").to_string();
+        // receive_code 是提取码
+        let receive_code = data["receive_code"].as_str().unwrap_or("").to_string();
 
-        info!("🔗 创建分享链接 → 115.com/s/{}", link_id);
+        info!("🔗 创建分享链接 → 115.com/s/{}", share_code);
 
         Ok(ShareResult {
-            share_url: format!("https://115.com/s/{}", link_id),
-            pick_code: pick,
-            share_id: link_id,
+            share_url: format!("https://115.com/s/{}", share_code),
+            pick_code: receive_code,
+            share_id: share_code,
         })
     }
 
