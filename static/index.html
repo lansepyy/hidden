@@ -89,14 +89,24 @@ tr:hover td { background: rgba(28,33,40,.6); }
 @keyframes slideIn { from { opacity:0; transform: translateX(20px); } to { opacity:1; transform: none; } }
 
 /* ── Resource cards ── */
-.resource-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; }
-.res-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; cursor: pointer; transition: border-color .15s, transform .15s; }
-.res-card:hover { border-color: var(--blue); transform: translateY(-2px); }
-.res-poster { width: 100%; aspect-ratio: 2/3; object-fit: cover; background: var(--surface2); }
-.res-poster-ph { width: 100%; aspect-ratio: 2/3; background: var(--surface2); display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 2rem; }
-.res-info { padding: 10px; }
-.res-title { font-size: 0.85rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.res-meta { font-size: 0.75rem; color: var(--muted); margin-top: 3px; }
+.resource-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; }
+.res-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; cursor: pointer; transition: border-color .2s, transform .2s, box-shadow .2s; position: relative; }
+.res-card:hover { border-color: var(--blue); transform: translateY(-4px); box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+.res-card:hover .res-overlay { opacity: 1; }
+.res-poster-wrap { position: relative; width: 100%; aspect-ratio: 2/3; overflow: hidden; }
+.res-poster { width: 100%; height: 100%; object-fit: cover; background: var(--surface2); display: block; }
+.res-poster-ph { width: 100%; height: 100%; background: var(--surface2); display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 2.5rem; }
+.res-overlay { position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,.85) 0%, rgba(0,0,0,.2) 50%, transparent 100%); opacity: 0; transition: opacity .2s; display: flex; flex-direction: column; justify-content: flex-end; padding: 12px; }
+.res-overlay-title { font-size: .82rem; font-weight: 700; color: #fff; line-height: 1.3; margin-bottom: 4px; }
+.res-overlay-meta { font-size: .72rem; color: rgba(255,255,255,.75); }
+.res-info { padding: 8px 10px 10px; }
+.res-title { font-size: 0.82rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.res-meta { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
+/* ── Resource detail modal ── */
+.res-hero { width: 100%; height: 220px; object-fit: cover; border-radius: 6px 6px 0 0; display: block; margin: -24px -24px 20px; width: calc(100% + 48px); }
+.res-hero-wrap { margin: -24px -24px 20px; border-radius: 6px 6px 0 0; overflow: hidden; position: relative; }
+.res-hero-img { width: 100%; height: 200px; object-fit: cover; display: block; }
+.res-hero-gradient { position: absolute; inset: 0; background: linear-gradient(to bottom, transparent 30%, var(--surface) 100%); }
 
 /* ── Page header ── */
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
@@ -124,6 +134,41 @@ tr:hover td { background: rgba(28,33,40,.6); }
 .modal-box { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; width: 90%; max-width: 700px; max-height: 85vh; overflow-y: auto; padding: 24px; position: relative; }
 .modal-close { position: absolute; top: 14px; right: 16px; background: none; border: none; color: var(--muted); font-size: 1.2rem; cursor: pointer; }
 .modal-close:hover { color: var(--text); }
+
+/* ── Folder Browser ── */
+.folder-browser { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.folder-breadcrumb { background: var(--surface2); padding: 8px 12px; font-size: .8rem; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
+.folder-breadcrumb span { color: var(--muted); cursor: pointer; }
+.folder-breadcrumb span:hover { color: var(--blue); text-decoration: underline; }
+.folder-breadcrumb .sep { color: var(--border); user-select: none; }
+.folder-list { min-height: 200px; max-height: 340px; overflow-y: auto; }
+.folder-item { display: flex; align-items: center; gap: 10px; padding: 9px 14px; cursor: pointer; border-bottom: 1px solid rgba(48,54,61,.4); font-size: .875rem; transition: background .1s; }
+.folder-item:last-child { border-bottom: none; }
+.folder-item:hover { background: var(--surface2); }
+.folder-item i { color: var(--yellow); font-size: 1rem; flex-shrink: 0; }
+.folder-item .fname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-item .fid { font-size: .72rem; color: var(--muted); font-family: monospace; }
+.folder-item .open-btn { font-size: .75rem; color: var(--muted); flex-shrink: 0; padding: 2px 6px; border: 1px solid var(--border); border-radius: 4px; background: none; cursor: pointer; }
+.folder-item .open-btn:hover { border-color: var(--blue); color: var(--blue); }
+.input-with-btn { display: flex; gap: 6px; align-items: stretch; }
+.input-with-btn .form-control { flex: 1; }
+.btn-browse { background: var(--surface2); border: 1px solid var(--border); color: var(--muted); padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: .8rem; white-space: nowrap; transition: all .15s; }
+.btn-browse:hover { border-color: var(--blue); color: var(--blue); }
+
+/* ── Log Page ── */
+.log-entry { border-bottom: 1px solid rgba(48,54,61,.5); padding: 10px 14px; font-size: .82rem; display: grid; grid-template-columns: 160px 64px 1fr; gap: 10px; align-items: start; }
+.log-entry:last-child { border-bottom: none; }
+.log-entry:hover { background: rgba(28,33,40,.5); }
+.log-time { color: var(--muted); font-family: monospace; font-size: .75rem; white-space: nowrap; }
+.log-url { grid-column: 3; color: var(--muted); font-size: .75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px; }
+.log-step { grid-column: 3; color: var(--text); margin-top: 2px; }
+.log-err  { grid-column: 3; color: var(--red); margin-top: 4px; font-size: .78rem; background: rgba(248,81,73,.07); border-left: 2px solid var(--red); padding: 4px 8px; border-radius: 0 4px 4px 0; white-space: pre-wrap; word-break: break-all; }
+.log-filter-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.log-filter-bar button { background: var(--surface); border: 1px solid var(--border); color: var(--muted); padding: 4px 12px; border-radius: 20px; cursor: pointer; font-size: .78rem; transition: all .15s; }
+.log-filter-bar button.active { border-color: var(--blue); color: var(--blue); background: rgba(88,166,255,.1); }
+.log-auto-badge { font-size: .72rem; color: var(--green); margin-left: auto; display: flex; align-items: center; gap: 5px; }
+.live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: pulse 1.4s ease-in-out infinite; display: inline-block; }
+@keyframes pulse { 0%,100%{opacity:1}50%{opacity:.3} }
 </style>
 </head>
 <body>
@@ -136,6 +181,7 @@ tr:hover td { background: rgba(28,33,40,.6); }
     <li><a class="nav-link" data-page="resources" href="#" onclick="navigate('resources');return false"><i class="bi bi-collection-play"></i>资源库</a></li>
     <li><a class="nav-link" data-page="shares" href="#" onclick="navigate('shares');return false"><i class="bi bi-share"></i>分享管理</a></li>
     <li><a class="nav-link" data-page="tasks" href="#" onclick="navigate('tasks');return false"><i class="bi bi-arrow-down-circle"></i>导入任务</a></li>
+    <li><a class="nav-link" data-page="logs" href="#" onclick="navigate('logs');return false"><i class="bi bi-terminal"></i>系统日志</a></li>
     <li><a class="nav-link" data-page="settings" href="#" onclick="navigate('settings');return false"><i class="bi bi-gear"></i>系统设置</a></li>
   </ul>
   <div class="version" id="sidebar-version">洞天福地 Hidden</div>
@@ -290,12 +336,18 @@ tr:hover td { background: rgba(28,33,40,.6); }
       </div>
       <div class="settings-row">
         <div>
-          <label class="form-label">成品目录 CID</label>
-          <input id="s-account_115_root_folder_id" class="form-control" placeholder="115 成品文件夹 ID">
+          <label class="form-label">成品目录 CID <span style="color:var(--muted);font-size:.72rem">（整理后文件移入此目录）</span></label>
+          <div class="input-with-btn">
+            <input id="s-account_115_root_folder_id" class="form-control" placeholder="115 成品文件夹 ID">
+            <button class="btn-browse" onclick="openFolderBrowser('s-account_115_root_folder_id','成品目录')"><i class="bi bi-folder2-open"></i> 浏览</button>
+          </div>
         </div>
         <div>
-          <label class="form-label">临时目录 CID</label>
-          <input id="s-account_115_temp_folder_id" class="form-control" placeholder="115 临时文件夹 ID">
+          <label class="form-label">临时目录 CID <span style="color:var(--muted);font-size:.72rem">（转存暂存目录）</span></label>
+          <div class="input-with-btn">
+            <input id="s-account_115_temp_folder_id" class="form-control" placeholder="115 临时文件夹 ID">
+            <button class="btn-browse" onclick="openFolderBrowser('s-account_115_temp_folder_id','临时目录')"><i class="bi bi-folder2-open"></i> 浏览</button>
+          </div>
         </div>
       </div>
       <div class="settings-row">
@@ -377,13 +429,47 @@ tr:hover td { background: rgba(28,33,40,.6); }
   </form>
 </div>
 
+<!-- ── Logs ── -->
+<div id="page-logs" class="page">
+  <div class="page-header">
+    <h1><i class="bi bi-terminal me-2" style="color:var(--green)"></i>系统日志</h1>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:.8rem;color:var(--muted)">日志级别：</span>
+      <select id="log-level-select" class="form-select" style="width:auto;font-size:.8rem;padding:4px 10px" onchange="applyLogLevel()">
+        <option value="hidden=debug,tower_http=warn,sqlx=warn">DEBUG（最详细）</option>
+        <option value="hidden=info,tower_http=warn,sqlx=warn">INFO</option>
+        <option value="hidden=warn,tower_http=warn,sqlx=warn">WARN</option>
+        <option value="hidden=error">ERROR（仅错误）</option>
+      </select>
+      <span id="log-level-badge" style="font-size:.72rem;color:var(--muted)"></span>
+      <span class="log-auto-badge"><span class="live-dot"></span>自动刷新 5s</span>
+      <button class="btn-sm-ghost" onclick="loadLogs()"><i class="bi bi-arrow-clockwise"></i> 刷新</button>
+    </div>
+  </div>
+  <div class="log-filter-bar" id="log-filter-bar">
+    <button class="active" onclick="setLogFilter('',this)">ALL</button>
+    <button onclick="setLogFilter('failed',this)">失败</button>
+    <button onclick="setLogFilter('completed',this)">完成</button>
+    <button onclick="setLogFilter('pending',this)">等待</button>
+    <button onclick="setLogFilter('parsing',this)">解析中</button>
+    <button onclick="setLogFilter('transferring',this)">转存中</button>
+    <span style="margin-left:auto;font-size:.75rem;color:var(--muted)">ID 最大 200 条</span>
+  </div>
+  <div class="card" style="overflow:hidden">
+    <div id="log-list"><div style="padding:24px;text-align:center"><span class="spinner"></span></div></div>
+  </div>
+</div>
+
 </div><!-- /main -->
 
 <!-- ── Resource Detail Modal ── -->
 <div id="res-modal" class="modal-overlay" onclick="if(event.target===this)closeModal()">
-  <div class="modal-box">
-    <button class="modal-close" onclick="closeModal()"><i class="bi bi-x-lg"></i></button>
-    <div id="res-modal-body"></div>
+  <div class="modal-box" style="padding-top:0;overflow:hidden">
+    <div id="res-hero-area"></div>
+    <div style="padding:0 24px 24px;position:relative">
+      <button class="modal-close" onclick="closeModal()" style="top:8px;right:16px"><i class="bi bi-x-lg"></i></button>
+      <div id="res-modal-body"></div>
+    </div>
   </div>
 </div>
 
@@ -415,6 +501,7 @@ function navigate(page) {
     case 'shares':    loadShares();    break;
     case 'tasks':     loadTasks(); startTasksAutoRefresh(); break;
     case 'settings':  loadSettings();  break;
+    case 'logs':      loadLogs(); startLogsAutoRefresh(); break;
   }
 }
 
@@ -553,12 +640,18 @@ async function renderResources() {
     document.getElementById('res-total').textContent = `共 ${total} 条结果`;
     grid.innerHTML = items.length ? items.map(r => `
       <div class="res-card" onclick="showResource(${r.id})">
-        ${r.poster_url
-          ? `<img class="res-poster" src="${escHtml(r.poster_url)}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
-          : ''}
-        <div class="res-poster-ph"${r.poster_url?' style="display:none"':''}><i class="bi bi-film"></i></div>
+        <div class="res-poster-wrap">
+          ${r.poster_url
+            ? `<img class="res-poster" src="${escHtml(r.poster_url)}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+            : ''}
+          <div class="res-poster-ph"${r.poster_url?' style="display:none"':''}><i class="bi bi-film"></i></div>
+          <div class="res-overlay">
+            <div class="res-overlay-title">${escHtml(r.title)}</div>
+            <div class="res-overlay-meta">${typeLabel(r.resource_type)}${r.year ? ' · ' + r.year : ''}</div>
+          </div>
+        </div>
         <div class="res-info">
-          <div class="res-title">${escHtml(r.title)}</div>
+          <div class="res-title" title="${escHtml(r.title)}">${escHtml(r.title)}</div>
           <div class="res-meta">${typeLabel(r.resource_type)}${r.year ? ' · ' + r.year : ''}</div>
         </div>
       </div>`).join('')
@@ -593,18 +686,25 @@ async function showResource(id) {
         <td style="color:var(--muted);font-size:.8rem">${fmtSize(f.file_size)}</td>
         <td style="color:var(--muted);font-size:.8rem">${escHtml(f.quality||'—')}</td>
       </tr>`).join('');
+    // hero backdrop
+    const heroArea = document.getElementById('res-hero-area');
+    if (r.backdrop_url) {
+      heroArea.innerHTML = `<div class="res-hero-wrap"><img class="res-hero-img" src="${escHtml(r.backdrop_url)}" loading="lazy" onerror="this.parentElement.style.display='none'"><div class="res-hero-gradient"></div></div>`;
+    } else {
+      heroArea.innerHTML = '';
+    }
     body.innerHTML = `
-      <div style="display:flex;gap:20px;margin-bottom:16px">
-        ${r.poster_url ? `<img src="${escHtml(r.poster_url)}" style="width:100px;border-radius:6px;object-fit:cover;flex-shrink:0" loading="lazy">` : ''}
-        <div>
-          <h2 style="font-size:1.2rem;margin:0 0 6px">${escHtml(r.title)}</h2>
-          ${r.original_title ? `<div style="color:var(--muted);font-size:.85rem;margin-bottom:6px">${escHtml(r.original_title)}</div>` : ''}
-          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <div style="display:flex;gap:20px;margin-bottom:20px;align-items:flex-start">
+        ${r.poster_url ? `<img src="${escHtml(r.poster_url)}" style="width:110px;min-width:110px;border-radius:6px;object-fit:cover;box-shadow:0 4px 16px rgba(0,0,0,.4)" loading="lazy">` : ''}
+        <div style="flex:1;min-width:0">
+          <h2 style="font-size:1.25rem;margin:0 0 4px;line-height:1.3">${escHtml(r.title)}</h2>
+          ${r.original_title ? `<div style="color:var(--muted);font-size:.82rem;margin-bottom:8px">${escHtml(r.original_title)}</div>` : ''}
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center">
             ${r.year ? `<span class="badge-completed">${r.year}</span>` : ''}
             <span class="badge-pending">${typeLabel(r.resource_type)}</span>
-            ${r.tmdb_id ? `<span style="color:var(--muted);font-size:.75rem">TMDB #${r.tmdb_id}</span>` : ''}
+            ${r.tmdb_id ? `<a href="https://www.themoviedb.org/${r.resource_type==='movie'?'movie':'tv'}/${r.tmdb_id}" target="_blank" rel="noopener" style="color:var(--blue);font-size:.75rem;text-decoration:none"><i class="bi bi-box-arrow-up-right me-1"></i>TMDB</a>` : ''}
           </div>
-          ${r.overview ? `<p style="font-size:.85rem;color:var(--muted);line-height:1.5;max-width:500px">${escHtml(r.overview)}</p>` : ''}
+          ${r.overview ? `<p style="font-size:.83rem;color:var(--muted);line-height:1.6;margin:0;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden">${escHtml(r.overview)}</p>` : ''}
         </div>
       </div>
       ${sharesHtml ? `
@@ -714,9 +814,9 @@ async function renderTasks() {
         <td style="white-space:nowrap">
           ${t.status==='failed'||t.status==='skipped' ? `<button class="btn-sm-ghost" onclick="retryTask(${t.id})">重试</button>` : ''}
           ${t.status==='pending' ? `<button class="btn-sm-danger" onclick="cancelTask(${t.id})" style="margin-left:4px">取消</button>` : ''}
-          ${t.error_message ? `<span title="${escHtml(t.error_message)}" style="margin-left:6px;cursor:help;color:var(--red)"><i class="bi bi-exclamation-circle"></i></span>` : ''}
         </td>
-      </tr>`).join('')
+      </tr>
+      ${t.error_message ? `<tr style="background:rgba(248,81,73,.04)"><td colspan="6" style="padding:4px 12px 10px 48px;color:var(--red);font-size:.78rem;border-bottom:1px solid rgba(48,54,61,.5)"><i class="bi bi-exclamation-circle me-1"></i>${escHtml(t.error_message)}</td></tr>` : ''}`).join('')
       : '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">暂无任务，去提交一个吧</td></tr>';
     renderPager('tasks-pager', tasksPage, Math.ceil(((data.total)||items.length) / tasksLimit), p => { tasksPage = p; renderTasks(); });
   } catch(e) {
@@ -804,6 +904,177 @@ function renderPager(containerId, page, totalPages, onPage) {
 // Init
 // ══════════════════════════════════════════════
 window.addEventListener('DOMContentLoaded', () => loadDashboard());
+
+// ══════════════════════════════════════════════
+// Logs
+// ══════════════════════════════════════════════
+let logsFilter = '';
+let logsRefreshTimer = null;
+
+function setLogFilter(status, btn) {
+  logsFilter = status;
+  document.querySelectorAll('#log-filter-bar button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadLogs();
+}
+
+function startLogsAutoRefresh() {
+  if (logsRefreshTimer) clearInterval(logsRefreshTimer);
+  logsRefreshTimer = setInterval(() => {
+    if (currentPage === 'logs') loadLogs();
+    else clearInterval(logsRefreshTimer);
+  }, 5000);
+}
+
+const STATUS_LABEL = {
+  pending: '等待中', parsing: '解析中', waiting_space: '检查空间',
+  transferring: '转存中', transfer_failed: '转存失败', organizing: '整理中',
+  sharing: '创建分享', verifying: '验证中', completed: '已完成',
+  failed: '失败', skipped: '跳过',
+};
+const STATUS_COLOR = {
+  completed: 'var(--green)', failed: 'var(--red)', transfer_failed: 'var(--red)',
+  skipped: 'var(--muted)', pending: 'var(--yellow)', parsing: 'var(--blue)',
+  transferring: 'var(--blue)', organizing: 'var(--blue)', sharing: 'var(--blue)',
+  verifying: 'var(--blue)', waiting_space: 'var(--yellow)',
+};
+
+async function loadLogs() {
+  const el = document.getElementById('log-list');
+  // 同步当前日志级别显示
+  try {
+    const lvl = await api('GET', '/logs/level');
+    const sel = document.getElementById('log-level-select');
+    if (sel) {
+      // 匹配最接近的选项
+      const opt = [...sel.options].find(o => o.value === lvl.level);
+      if (opt) sel.value = lvl.level;
+      document.getElementById('log-level-badge').textContent = '(当前: ' + lvl.level.split(',')[0] + ')';
+    }
+  } catch(_) {}
+  try {
+    const data = await api('GET', '/logs');
+    let entries = data.entries || [];
+    if (logsFilter) entries = entries.filter(e => e.status === logsFilter);
+    if (!entries.length) {
+      el.innerHTML = '<div style="padding:28px;text-align:center;color:var(--muted)"><i class="bi bi-inbox" style="font-size:1.5rem"></i><br>暂无日志记录</div>';
+      return;
+    }
+    el.innerHTML = entries.map(e => {
+      const color = STATUS_COLOR[e.status] || 'var(--text)';
+      const label = STATUS_LABEL[e.status] || e.status;
+      const updTime = e.updated_at ? fmtDateFull(e.updated_at) : '—';
+      const shortUrl = (e.url || '').replace(/https?:\/\/(115cdn\.com|115\.com)\/s\//, '').slice(0, 40);
+      return `<div class="log-entry">
+        <span class="log-time">${updTime}</span>
+        <span style="color:${color};font-size:.78rem;font-weight:600">${label}</span>
+        <span class="log-url"><i class="bi bi-link-45deg me-1"></i><a href="${escHtml(e.url||'')}" target="_blank" title="${escHtml(e.url||'')}">#${e.task_id} ${escHtml(shortUrl)}</a></span>
+        ${e.step ? `<span class="log-step"><i class="bi bi-arrow-right-short"></i>${escHtml(e.step)}</span>` : ''}
+        ${e.error ? `<span class="log-err"><i class="bi bi-exclamation-triangle me-1"></i>${escHtml(e.error)}</span>` : ''}
+      </div>`;
+    }).join('');
+  } catch(err) {
+    el.innerHTML = `<div style="padding:16px;color:var(--red)"><i class="bi bi-exclamation-circle me-1"></i>${escHtml(err.message)}</div>`;
+  }
+}
+
+function fmtDateFull(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString('zh-CN') + ' ' + d.toTimeString().slice(0, 8);
+}
+
+async function applyLogLevel() {
+  const level = document.getElementById('log-level-select').value;
+  try {
+    await api('PUT', '/logs/level', { level });
+    document.getElementById('log-level-badge').textContent = '(当前: ' + level.split(',')[0] + ')';
+    toast('日志级别已更新为 ' + level.split('=')[1]?.split(',')[0], 'success');
+  } catch(e) { toast('设置失败: ' + e.message, 'error'); }
+}
+
+// ══════════════════════════════════════════════
+// Folder Browser
+// ══════════════════════════════════════════════
+let _fbTargetId = '';
+let _fbStack = []; // [{cid, name}]
+
+function openFolderBrowser(targetInputId, label) {
+  _fbTargetId = targetInputId;
+  _fbStack = [{ cid: '0', name: '根目录' }];
+  document.getElementById('fb-modal-title').textContent = '选择' + label;
+  document.getElementById('fb-modal').classList.add('open');
+  fbLoad('0');
+}
+function closeFolderBrowser() {
+  document.getElementById('fb-modal').classList.remove('open');
+}
+function fbSelectCurrent() {
+  const top = _fbStack[_fbStack.length - 1];
+  if (top.cid === '0') { toast('请选择具体文件夹，不能使用根目录', 'error'); return; }
+  document.getElementById(_fbTargetId).value = top.cid;
+  toast('已选择：' + top.name + ' (ID: ' + top.cid + ')', 'success');
+  closeFolderBrowser();
+}
+async function fbLoad(cid) {
+  const listEl = document.getElementById('fb-list');
+  listEl.innerHTML = '<div style="padding:24px;text-align:center"><span class="spinner"></span></div>';
+  fbRenderBreadcrumb();
+  try {
+    const folders = await api('GET', '/folders?cid=' + encodeURIComponent(cid));
+    if (!folders.length) {
+      listEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)"><i class="bi bi-folder-x" style="font-size:1.5rem"></i><br>此目录下没有子文件夹</div>';
+      return;
+    }
+    listEl.innerHTML = folders.map(f => `
+      <div class="folder-item">
+        <i class="bi bi-folder-fill"></i>
+        <span class="fname" title="${escHtml(f.name)}">${escHtml(f.name)}</span>
+        <span class="fid">${escHtml(f.id)}</span>
+        <button class="open-btn" onclick="fbEnter('${escHtml(f.id)}','${escHtml(f.name).replace(/'/g,"&#39;")}')"><i class="bi bi-chevron-right"></i></button>
+        <button class="btn-sm-ghost" onclick="fbPick('${escHtml(f.id)}','${escHtml(f.name).replace(/'/g,"&#39;")}')">选择</button>
+      </div>`).join('');
+  } catch(e) {
+    listEl.innerHTML = `<div style="padding:16px;color:var(--red)">${escHtml(e.message)}</div>`;
+  }
+}
+function fbEnter(cid, name) {
+  _fbStack.push({ cid, name });
+  fbLoad(cid);
+}
+function fbBack(index) {
+  _fbStack = _fbStack.slice(0, index + 1);
+  fbLoad(_fbStack[_fbStack.length - 1].cid);
+}
+function fbPick(cid, name) {
+  document.getElementById(_fbTargetId).value = cid;
+  toast('已选择：' + name + ' (ID: ' + cid + ')', 'success');
+  closeFolderBrowser();
+}
+function fbRenderBreadcrumb() {
+  const el = document.getElementById('fb-breadcrumb');
+  el.innerHTML = _fbStack.map((item, i) => {
+    const isLast = i === _fbStack.length - 1;
+    return (i > 0 ? '<span class="sep">/</span>' : '') +
+      `<span ${isLast ? 'style="color:var(--text)"' : `onclick="fbBack(${i})"`}>${escHtml(item.name)}</span>`;
+  }).join('');
+}
 </script>
+
+<!-- ── Folder Browser Modal ── -->
+<div id="fb-modal" class="modal-overlay" onclick="if(event.target===this)closeFolderBrowser()">
+  <div class="modal-box" style="max-width:560px">
+    <button class="modal-close" onclick="closeFolderBrowser()"><i class="bi bi-x-lg"></i></button>
+    <h2 id="fb-modal-title" style="font-size:1rem;font-weight:700;margin:0 0 16px">选择文件夹</h2>
+    <div class="folder-browser">
+      <div class="folder-breadcrumb" id="fb-breadcrumb"></div>
+      <div class="folder-list" id="fb-list"></div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+      <button class="btn-sm-ghost" onclick="closeFolderBrowser()">取消</button>
+      <button class="btn-primary" onclick="fbSelectCurrent()"><i class="bi bi-check-lg me-1"></i>选择当前目录</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>

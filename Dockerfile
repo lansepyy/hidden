@@ -33,11 +33,12 @@ RUN BUILD_SHA="${BUILD_SHA}" \
 # ─── 第二阶段：运行镜像 ─────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
 
-# 安装运行时依赖（OpenSSL、CA 证书、时区数据）
+# 安装运行时依赖（OpenSSL、CA 证书、时区数据、wget 用于健康检查）
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
     tzdata \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
 # 创建非 root 用户运行应用

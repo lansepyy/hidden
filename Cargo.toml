@@ -46,7 +46,7 @@ dotenvy = "0.15"
 
 # Logging / Tracing
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt", "registry"] }
 
 # Date/Time
 chrono = { version = "0.4", features = ["serde"] }

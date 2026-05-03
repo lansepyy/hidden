@@ -71,3 +71,56 @@ pub async fn get_stats(State(state): State<AppState>) -> Result<Json<Value>> {
         }
     })))
 }
+
+/// GET /api/logs  —  最近任务活动流水（用于 WebUI 日志页）
+pub async fn get_logs(State(state): State<AppState>) -> Result<Json<serde_json::Value>> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT id, source_share_url, status, current_step, error_message,
+               created_at, updated_at
+        FROM import_tasks
+        ORDER BY updated_at DESC
+        LIMIT 200
+        "#
+    )
+    .fetch_all(&state.db)
+    .await?;
+
+    let entries: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "task_id":   r.id,
+                "url":       r.source_share_url,
+                "status":    r.status,
+                "step":      r.current_step,
+                "error":     r.error_message,
+                "created_at": r.created_at,
+                "updated_at": r.updated_at,
+            })
+        })
+        .collect();
+
+    Ok(Json(serde_json::json!({ "entries": entries, "total": entries.len() })))
+}
+
+/// GET /api/logs/level  —  获取当前日志级别
+pub async fn get_log_level(State(state): State<AppState>) -> Json<Value> {
+    Json(json!({ "level": (state.log_level_getter)() }))
+}
+
+/// PUT /api/logs/level  —  动态修改日志级别
+#[derive(serde::Deserialize)]
+pub struct SetLogLevelBody {
+    pub level: String,
+}
+
+pub async fn set_log_level(
+    State(state): State<AppState>,
+    Json(body): Json<SetLogLevelBody>,
+) -> Result<Json<Value>> {
+    (state.log_level_setter)(body.level.clone())
+        .map_err(|e| crate::error::AppError::BadRequest(e.to_string()))?;
+    tracing::info!("日志级别已动态更新为: {}", body.level);
+    Ok(Json(json!({ "level": body.level, "ok": true })))
+}

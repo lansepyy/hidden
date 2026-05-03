@@ -103,9 +103,43 @@ pub async fn create_task(
     Json(req): Json<CreateTaskRequest>,
 ) -> Result<Json<TaskResponse>> {
     // 简单校验
-    if req.share_url.trim().is_empty() {
+    let raw_url = req.share_url.trim().to_string();
+    if raw_url.is_empty() {
         return Err(AppError::BadRequest("share_url 不能为空".to_string()));
     }
+
+    // 自动从 URL 的 ?password= 或 &password= 参数提取提取码（pick_code）
+    // 示例：https://115cdn.com/s/swwshg73wrb?password=jbe0
+    let pick_code = req.pick_code.clone().or_else(|| {
+        raw_url
+            .split_once('?')
+            .and_then(|(_, qs)| {
+                qs.split('&').find_map(|pair| {
+                    let (k, v) = pair.split_once('=')?;
+                    if k == "password" && !v.is_empty() {
+                        Some(v.to_string())
+                    } else {
+                        None
+                    }
+                })
+            })
+    });
+
+    // 存入数据库时移除 URL 中的 password 参数（避免泰露）
+    let clean_url = raw_url
+        .split_once('?')
+        .map(|(base, qs)| {
+            let filtered: Vec<&str> = qs
+                .split('&')
+                .filter(|p| !p.starts_with("password="))
+                .collect();
+            if filtered.is_empty() {
+                base.to_string()
+            } else {
+                format!("{}?{}", base, filtered.join("&"))
+            }
+        })
+        .unwrap_or(raw_url);
 
     let task = sqlx::query_as!(
         ImportTask,
@@ -118,8 +152,8 @@ pub async fn create_task(
             total_size, total_files, current_step, error_message,
             priority, category, remark, created_at, updated_at
         "#,
-        req.share_url.trim(),
-        req.pick_code,
+        clean_url,
+        pick_code,
         req.priority,
         req.category,
         req.remark,

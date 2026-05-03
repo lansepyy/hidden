@@ -15,6 +15,8 @@ pub fn router() -> Router<AppState> {
         // 健康检查
         .route("/health", get(health::health_check))
         .route("/stats", get(health::get_stats))
+        .route("/logs", get(health::get_logs))
+        .route("/logs/level", get(health::get_log_level).put(health::set_log_level))
         // 运行时配置
         .route(
             "/settings",
@@ -37,6 +39,8 @@ pub fn router() -> Router<AppState> {
         .route("/resources/:id", get(resources::get_resource))
         .route("/resources/:id/shares", get(resources::get_resource_shares))
         .route("/resources/:id/files", get(resources::get_resource_files))
+        // 115 文件夹浏览（设置页用）
+        .route("/folders", get(resources::list_folders))
         // 分享管理
         .route("/shares", get(shares::list_shares))
         .route("/shares/:id", get(shares::get_share))

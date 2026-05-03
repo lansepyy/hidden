@@ -8,11 +8,9 @@ services:
     environment:
       POSTGRES_DB: hidden
       POSTGRES_USER: hidden
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hidden_secret}
+      POSTGRES_PASSWORD: hidden_secret
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hidden -d hidden"]
       interval: 10s
@@ -24,11 +22,9 @@ services:
   redis:
     image: redis:7-alpine
     container_name: hidden-redis
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
+    command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -48,18 +44,14 @@ services:
       redis:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://hidden:${POSTGRES_PASSWORD:-hidden_secret}@postgres:5432/hidden
-      REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379
+      DATABASE_URL: postgres://hidden:hidden_secret@postgres:5432/hidden
+      REDIS_URL: redis://redis:6379
       HOST: 0.0.0.0
       PORT: 8080
       APP_ENV: production
-      JWT_SECRET: ${JWT_SECRET:-change-this-in-production}
-    env_file:
-      - .env
+      JWT_SECRET: hidden-jwt-secret-please-change
     ports:
-      - "${APP_PORT:-8080}:8080"   # WebUI: http://localhost:8080
-    volumes:
-      - ./logs:/app/logs
+      - "8080:8080"   # WebUI: http://localhost:8080
     restart: unless-stopped
     logging:
       driver: "json-file"

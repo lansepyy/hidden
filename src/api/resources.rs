@@ -45,6 +45,7 @@ pub struct ResourceResponse {
     pub imdb_id: Option<String>,
     pub overview: Option<String>,
     pub poster_url: Option<String>,
+    pub backdrop_url: Option<String>,
     pub status: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
@@ -61,6 +62,7 @@ impl From<Resource> for ResourceResponse {
             imdb_id: r.imdb_id,
             overview: r.overview,
             poster_url: r.poster_url,
+            backdrop_url: r.backdrop_url,
             status: r.status,
             created_at: r.created_at,
         }
@@ -208,4 +210,50 @@ pub async fn get_resource_files(
     .await?;
 
     Ok(Json(files))
+}
+
+// ─────────────────────────────────────────────
+// GET /api/folders?cid=0  →  列出 115 子目录（文件夹选择器专用）
+// ─────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+pub struct FolderItem {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FolderQuery {
+    #[serde(default = "default_folder_cid")]
+    pub cid: String,
+}
+
+fn default_folder_cid() -> String {
+    "0".to_string()
+}
+
+pub async fn list_folders(
+    State(state): State<AppState>,
+    Query(params): Query<FolderQuery>,
+) -> Result<Json<Vec<FolderItem>>> {
+    let adapter = state
+        .build_adapter()
+        .await
+        .map_err(|e| AppError::Config(e.to_string()))?;
+
+    let entries = adapter
+        .list_files(&params.cid)
+        .await
+        .map_err(|e| AppError::Api115(e.to_string()))?;
+
+    let folders: Vec<FolderItem> = entries
+        .into_iter()
+        .filter(|f| f.is_dir)
+        .map(|f| FolderItem {
+            id: f.file_id.unwrap_or_default(),
+            name: f.name,
+        })
+        .collect();
+
+    Ok(Json(folders))
 }
