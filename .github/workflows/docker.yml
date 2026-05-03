@@ -91,6 +91,7 @@ jobs:
           if ! command -v sqlx &> /dev/null; then
             cargo install sqlx-cli --no-default-features --features postgres --locked
           fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Run migrations & generate sqlx offline cache
         env:
@@ -260,7 +261,7 @@ jobs:
             | **版本** | `${{ needs.build.outputs.version }}` |
             | **Commit** | `${{ github.sha }}` |
             | **镜像摘要** | `${{ needs.build.outputs.image_digest }}` |
-            | **构建时间** | ${{ github.event.head_commit.timestamp || github.event.created_at }} |
+            | **构建时间** | $(date -u '+%Y-%m-%d %H:%M UTC') |
             | **构建平台** | `linux/amd64`, `linux/arm64` |
 
             ### 📝 更新内容
