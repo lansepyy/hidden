@@ -154,15 +154,6 @@ impl Adapter115 {
             tree: all_files,
         })
     }
-                    attempt += 1;
-                    let backoff = Duration::from_secs(2u64.pow(attempt));
-                    warn!("请求失败（第 {}/{} 次重试）：{:?}，等待 {}s", attempt, max_retries, e, backoff.as_secs());
-                    sleep(backoff).await;
-                }
-                Err(e) => return Err(e),
-            }
-        }
-    }
 
     /// 带重试的 POST 请求
     async fn post_with_retry(
