@@ -76,88 +76,84 @@ impl Adapter115 {
     const WEBAPI: &'static str = "https://webapi.115.com";
     /// 文件管理 open 接口（proapi）
     const PROAPI: &'static str = "https://proapi.115.com";
-
-    /// 构建适配器实例
-    pub fn new(cookie: &str, config: Arc<Config>) -> anyhow::Result<Self> {
-        let mut headers = header::HeaderMap::new();
-        headers.insert(
-            header::USER_AGENT,
-            header::HeaderValue::from_static(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            ),
-        );
-        headers.insert(
-            header::ACCEPT,
-            header::HeaderValue::from_static("application/json, text/javascript, */*; q=0.01"),
-        );
-        headers.insert(
-            header::HeaderName::from_static("cookie"),
-            header::HeaderValue::from_str(cookie)
-                .context("Cookie 格式无效")?,
-        );
-
-        let client = Client::builder()
-            .default_headers(headers)
-            .timeout(Duration::from_secs(30))
-            .gzip(true)
-            .build()?;
-
-        Ok(Self {
-            client,
-            cookie: cookie.to_string(),
-            config,
-            last_request: Arc::new(Mutex::new(
-                Instant::now() - Duration::from_secs(100),
-            )),
-        })
-    }
-
-    // ─────────────────────────────────────────────
-    // 内部工具方法
-    // ─────────────────────────────────────────────
-
-    /// 请求限速：确保两次请求间隔不低于配置值，并添加随机抖动
-    async fn rate_limit(&self) {
-        let interval_ms = self.config.account_115_request_interval_ms;
-        let jitter_ms = rand::thread_rng().gen_range(0..500u64);
-        let target_interval = Duration::from_millis(interval_ms + jitter_ms);
-
-        let mut last = self.last_request.lock().await;
-        let elapsed = last.elapsed();
-        if elapsed < target_interval {
-            let wait = target_interval - elapsed;
-            debug!("限速等待 {}ms", wait.as_millis());
-            sleep(wait).await;
-        }
-        *last = Instant::now();
-    }
-
-    /// 带重试的 GET 请求
-    async fn get_with_retry(
+    /// 解析 115 分享链接，通过分页拉取完整文件树（参数完全对齐 p115client）
+    ///
+    /// GET https://webapi.115.com/share/snap
+    /// params: share_code, receive_code, cid=0, limit=1000, offset=0
+    pub async fn parse_share(
         &self,
-        url: &str,
-        params: &[(&str, &str)],
-    ) -> anyhow::Result<serde_json::Value> {
-        let max_retries = self.config.account_115_retry_times;
-        let mut attempt = 0u32;
+        share_code: &str,
+        receive_code: Option<&str>,
+    ) -> anyhow::Result<ShareInfo> {
+        let url = format!("{}/share/snap", Self::WEBAPI);
+
+        let mut all_files: Vec<FileEntry> = Vec::new();
+        let mut offset = 0usize;
+        let limit = 1000usize;
 
         loop {
-            self.rate_limit().await;
+            let offset_str = offset.to_string();
+            let limit_str = limit.to_string();
+            let params = [
+                ("share_code", share_code),
+                ("receive_code", receive_code.unwrap_or("")),
+                ("cid", "0"),
+                ("limit", &limit_str),
+                ("offset", &offset_str),
+            ];
 
-            let result = self
-                .client
-                .get(url)
-                .query(params)
-                .send()
-                .await
-                .context("HTTP 请求失败")?
-                .json::<serde_json::Value>()
-                .await
-                .context("解析响应 JSON 失败");
+            let resp = self.get_with_retry(&url, &params).await?;
 
-            match result {
-                Ok(v) => return Ok(v),
-                Err(e) if attempt < max_retries => {
+            if !resp["state"].as_bool().unwrap_or(false) {
+                let errno = resp["errno"].as_i64().unwrap_or(0);
+                let msg = resp["msg"].as_str().unwrap_or("unknown");
+                bail!("解析分享失败 [errno={}]：{}", errno, msg);
+            }
+
+            let data = &resp["data"];
+            let files = data["list"].as_array().cloned().unwrap_or_default();
+            let count = data["count"].as_u64().unwrap_or(0) as usize;
+
+            for f in &files {
+                all_files.push(FileEntry {
+                    name: f["n"].as_str()
+                        .or_else(|| f["file_name"].as_str())
+                        .unwrap_or("").to_string(),
+                    size: f["s"].as_i64()
+                        .or_else(|| f["file_size"].as_i64())
+                        .unwrap_or(0),
+                    path: f["n"].as_str()
+                        .or_else(|| f["file_name"].as_str())
+                        .unwrap_or("").to_string(),
+                    is_dir: f["ico"].as_str() == Some("folder")
+                        || f["is_dir"].as_i64().unwrap_or(0) == 1,
+                    file_id: f["fid"].as_str()
+                        .or_else(|| f["file_id"].as_str())
+                        .map(|s| s.to_string()),
+                    pick_code: f["pc"].as_str()
+                        .or_else(|| f["pick_code"].as_str())
+                        .map(|s| s.to_string()),
+                });
+            }
+
+            offset += files.len();
+            if offset >= count || files.is_empty() {
+                break;
+            }
+        }
+
+        let total_size: i64 = all_files.iter().map(|f| f.size).sum();
+        let file_count = all_files.iter().filter(|f| !f.is_dir).count();
+
+        info!("📦 解析分享 {} 完成：{} 个文件，共 {} bytes", share_code, file_count, total_size);
+
+        Ok(ShareInfo {
+            share_id: share_code.to_string(),
+            total_size,
+            file_count,
+            tree: all_files,
+        })
+    }
                     attempt += 1;
                     let backoff = Duration::from_secs(2u64.pow(attempt));
                     warn!("请求失败（第 {}/{} 次重试）：{:?}，等待 {}s", attempt, max_retries, e, backoff.as_secs());
@@ -487,25 +483,24 @@ impl Adapter115 {
         Ok(resp["state"].as_bool().unwrap_or(false))
     }
 
-    /// 列出指定目录下的所有文件（不深递归）
+    /// 列出指定目录下的所有文件（不深递归，webapi 115 兼容性最佳）
     ///
-    /// GET https://proapi.115.com/open/ufile/files
-    /// params: cid, limit, offset, show_dir=1
-    pub async fn list_files(&self, folder_id: &str) -> anyhow::Result<Vec<FileEntry>> {
-        let url = format!("{}/open/ufile/files", Self::PROAPI);
+    /// GET https://webapi.115.com/files
+    /// params: cid, show_dir=1, limit=1150, offset=0, aid=1, count_folders=1, record_open_time=1
+    pub async fn list_files(&self, cid: &str) -> anyhow::Result<Vec<FileEntry>> {
+        let url = format!("{}/files", Self::WEBAPI);
         let params = [
-            ("cid", folder_id),
+            ("cid", cid),
             ("show_dir", "1"),
             ("limit", "1150"),
             ("offset", "0"),
+            ("aid", "1"),
+            ("count_folders", "1"),
+            ("record_open_time", "1"),
         ];
 
         let resp = self.get_with_retry(&url, &params).await?;
-
-        let data_arr = resp["data"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
+        let data_arr = resp["data"].as_array().cloned().unwrap_or_default();
 
         let entries: Vec<FileEntry> = data_arr
             .iter()
@@ -532,7 +527,7 @@ impl Adapter115 {
             })
             .collect();
 
-        info!("📂 列举目录 {} 完成：{} 个条目", folder_id, entries.len());
+        info!("📂 列举目录 {} 完成：{} 个条目", cid, entries.len());
         Ok(entries)
     }
 
