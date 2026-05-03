@@ -148,7 +148,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           # 构建参数：将 commit SHA 和构建时间注入到二进制
           build-args: |
             BUILD_VERSION=${{ steps.ver.outputs.version }}
