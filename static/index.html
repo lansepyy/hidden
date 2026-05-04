@@ -319,7 +319,7 @@ tr:hover td { background: rgba(28,33,40,.6); }
   <div class="card">
     <div id="shares-table-wrap" style="overflow-x:auto">
       <table>
-        <thead><tr><th>ID</th><th>TMDB 名称 / 分享标题</th><th>分享链接</th><th>文件数</th><th>状态</th><th>最后检查</th><th>操作</th></tr></thead>
+        <thead><tr><th>ID</th><th>TMDB 名称 / 分享标题</th><th>分享链接 / 提取码</th><th>文件数</th><th>状态</th><th>最后检查</th><th>操作</th></tr></thead>
         <tbody id="shares-tbody"></tbody>
       </table>
     </div>
@@ -390,18 +390,22 @@ tr:hover td { background: rgba(28,33,40,.6); }
         <div>
           <label class="form-label">成品目录 CID <span style="color:var(--muted);font-size:.72rem">（整理后文件移入此目录）</span></label>
           <div class="input-with-btn">
-            <input id="s-account_115_root_folder_id" class="form-control" placeholder="115 成品文件夹 ID">
+            <div style="flex:1;position:relative">
+              <input id="s-account_115_root_folder_id" class="form-control" style="padding-bottom:22px" placeholder="115 成品文件夹 ID">
+              <div id="s-account_115_root_folder_id-name" style="position:absolute;bottom:5px;left:12px;right:6px;font-size:.72rem;color:var(--yellow);pointer-events:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+            </div>
             <button class="btn-browse" onclick="openFolderBrowser('s-account_115_root_folder_id','成品目录')"><i class="bi bi-folder2-open"></i> 浏览</button>
           </div>
-          <div id="s-account_115_root_folder_id-name" style="font-size:.75rem;color:var(--muted);margin-top:4px;min-height:1.2em"></div>
         </div>
         <div>
           <label class="form-label">临时目录 CID <span style="color:var(--muted);font-size:.72rem">（转存暂存目录）</span></label>
           <div class="input-with-btn">
-            <input id="s-account_115_temp_folder_id" class="form-control" placeholder="115 临时文件夹 ID">
+            <div style="flex:1;position:relative">
+              <input id="s-account_115_temp_folder_id" class="form-control" style="padding-bottom:22px" placeholder="115 临时文件夹 ID">
+              <div id="s-account_115_temp_folder_id-name" style="position:absolute;bottom:5px;left:12px;right:6px;font-size:.72rem;color:var(--yellow);pointer-events:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+            </div>
             <button class="btn-browse" onclick="openFolderBrowser('s-account_115_temp_folder_id','临时目录')"><i class="bi bi-folder2-open"></i> 浏览</button>
           </div>
-          <div id="s-account_115_temp_folder_id-name" style="font-size:.75rem;color:var(--muted);margin-top:4px;min-height:1.2em"></div>
         </div>
       </div>
       <div class="settings-row">
@@ -1111,27 +1115,38 @@ async function renderShares() {
   let qs = `?skip=${sharesPage * sharesLimit}&limit=${sharesLimit}`;
   if (sharesFilter) qs += '&status=' + sharesFilter;
   const tbody = document.getElementById('shares-tbody');
-  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px"><span class="spinner"></span></td></tr>';
+  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px"><span class="spinner"></span></td></tr>';
   try {
     const data = await api('GET', '/shares' + qs);
     const items = data.items || [];
     tbody.innerHTML = items.length ? items.map(s => {
-      const displayTitle = s.resource_title || s.share_title || '—';
+      // TMDB 名称优先，无则用分享标题
+      const tmdbTitle = s.resource_title || '';
+      const rawTitle  = s.share_title   || '';
+      const displayTitle = tmdbTitle || rawTitle || '—';
       const meta = [
         s.resource_year,
         s.resource_type ? typeLabel(s.resource_type) : null,
         s.tmdb_id ? 'TMDB #' + s.tmdb_id : null
       ].filter(Boolean).join(' · ');
-      const shareTitle = s.share_title && s.share_title !== displayTitle ? s.share_title : '';
+      // 提取分享码：优先使用后端字段，否则从 URL 中解析
+      const shareCode = s.share_code || (s.share_url.match(/\/s\/([a-zA-Z0-9]+)/)?.[1]) || '—';
+      const pickCode  = s.pick_code  || '';
       return `
       <tr>
         <td style="color:var(--muted);font-size:.8rem">#${s.id}</td>
-        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis">
-          <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escHtml(displayTitle)}">${escHtml(displayTitle)}</div>
-          ${meta ? `<div style="color:var(--muted);font-size:.72rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(meta)}</div>` : ''}
-          ${shareTitle ? `<div style="color:var(--muted);font-size:.72rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escHtml(shareTitle)}">分享标题：${escHtml(shareTitle)}</div>` : ''}
+        <td style="max-width:200px">
+          <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px" title="${escHtml(displayTitle)}">${escHtml(displayTitle)}</div>
+          ${meta ? `<div style="color:var(--muted);font-size:.72rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px">${escHtml(meta)}</div>` : ''}
+          ${tmdbTitle && rawTitle && rawTitle !== tmdbTitle ? `<div style="color:var(--muted);font-size:.7rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px" title="${escHtml(rawTitle)}"><i class="bi bi-file-earmark-text me-1"></i>${escHtml(rawTitle)}</div>` : ''}
         </td>
-        <td><a href="${escHtml(s.share_url)}" target="_blank" style="font-size:.8rem">${escHtml(s.share_url)}</a></td>
+        <td style="max-width:240px">
+          <a href="${escHtml(s.share_url)}" target="_blank" style="font-size:.8rem;word-break:break-all">${escHtml(s.share_url)}</a>
+          <div style="margin-top:3px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <span style="font-family:monospace;font-size:.75rem;background:rgba(88,166,255,.12);color:var(--blue);border:1px solid rgba(88,166,255,.25);border-radius:4px;padding:1px 7px" title="分享码">${escHtml(shareCode)}</span>
+            ${pickCode ? `<span style="font-family:monospace;font-size:.75rem;background:rgba(188,140,255,.12);color:var(--purple);border:1px solid rgba(188,140,255,.25);border-radius:4px;padding:1px 7px" title="提取码">${escHtml(pickCode)}</span>` : ''}
+          </div>
+        </td>
         <td style="color:var(--muted);font-size:.8rem">${s.file_count||'—'}</td>
         <td>${statusBadge(s.status)}</td>
         <td style="color:var(--muted);font-size:.8rem">${fmtDate(s.last_checked_at)}</td>
@@ -1142,7 +1157,7 @@ async function renderShares() {
         </td>
       </tr>`;
     }).join('')
-      : '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:24px">暂无分享记录</td></tr>';
+      : '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">暂无分享记录</td></tr>';
     renderPager('shares-pager', sharesPage, Math.ceil((data.total||0) / sharesLimit), p => { sharesPage = p; renderShares(); });
   } catch(e) {
     tbody.innerHTML = `<tr><td colspan="7" style="color:var(--red);padding:16px">${escHtml(e.message)}</td></tr>`;

@@ -243,11 +243,15 @@ impl Adapter115 {
             let free = parse_size(&data["all_remain"]["size"]);
             let used = parse_size(&data["all_use"]["size"]);
             info!("📊 space_info - 已用:{} 剩余:{} raw_data={}", used, free, data);
-            if used > 0 || free > 0 {
+            if used > 0 && free > 0 {
                 let total = used + free;
                 return Ok(QuotaInfo { total, used, free });
             }
-            warn!("space_info 返回空数据，将尝试 index_info 端点");
+            if used > 0 && free == 0 {
+                warn!("space_info 返回 free=0（可能解析异常），将尝试 index_info 端点作为验证");
+            } else {
+                warn!("space_info 返回空数据，将尝试 index_info 端点");
+            }
         }
 
         // ── 方法 2：webapi /files/index_info ─────────────────────────────────
