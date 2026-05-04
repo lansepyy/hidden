@@ -225,6 +225,34 @@ impl TmdbClient {
         Ok(shows)
     }
 
+    /// TMDB 热门电影，用于资源库首页推荐入口。
+    pub async fn popular_movies(&self, limit: usize) -> Result<Vec<TmdbMovie>> {
+        let resp = self.get("/movie/popular", &[]).await?;
+        let mut movies: Vec<TmdbMovie> = resp["results"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|v| serde_json::from_value(v.clone()).ok())
+            .collect();
+        movies.truncate(limit);
+        Ok(movies)
+    }
+
+    /// TMDB 热门电视剧，用于资源库首页推荐入口。
+    pub async fn popular_tv(&self, limit: usize) -> Result<Vec<TmdbTv>> {
+        let resp = self.get("/tv/popular", &[]).await?;
+        let mut shows: Vec<TmdbTv> = resp["results"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|v| serde_json::from_value(v.clone()).ok())
+            .collect();
+        shows.truncate(limit);
+        Ok(shows)
+    }
+
     // ─────────────────────────────────────────────
     // 详情接口
     // ─────────────────────────────────────────────

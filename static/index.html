@@ -102,6 +102,13 @@ tr:hover td { background: rgba(28,33,40,.6); }
 .res-info { padding: 8px 10px 10px; }
 .res-title { font-size: 0.82rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .res-meta { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
+.res-toolbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
+.res-toolbar .btn-sm-ghost.active { border-color: var(--blue); color: var(--blue); background: rgba(88,166,255,.1); }
+.res-section-title { display:flex; align-items:center; justify-content:space-between; margin: 14px 0 10px; color: var(--muted); font-size:.82rem; font-weight:700; letter-spacing:.04em; }
+.res-card-actions { position:absolute; top:7px; right:7px; display:flex; gap:5px; z-index:3; opacity:0; transition:opacity .15s; }
+.res-card:hover .res-card-actions { opacity:1; }
+.res-card-actions button { background:rgba(13,17,23,.82); border:1px solid rgba(248,81,73,.55); color:var(--red); width:28px; height:28px; border-radius:6px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+.res-card-actions button:hover { background:rgba(248,81,73,.16); }
 /* ── Resource detail modal ── */
 .res-hero { width: 100%; height: 220px; object-fit: cover; border-radius: 6px 6px 0 0; display: block; margin: -24px -24px 20px; width: calc(100% + 48px); }
 .res-hero-wrap { margin: -24px -24px 20px; border-radius: 6px 6px 0 0; overflow: hidden; position: relative; }
@@ -230,36 +237,54 @@ tr:hover td { background: rgba(28,33,40,.6); }
   <div class="page-header">
     <h1><i class="bi bi-collection-play me-2" style="color:var(--purple)"></i>资源库</h1>
   </div>
-  <!-- Search bar -->
-  <div class="card mb-4" style="padding:16px">
-    <div class="row g-2 align-items-end">
-      <div class="col-md-5">
-        <label class="form-label">关键词</label>
-        <input id="res-kw" class="form-control" placeholder="标题搜索…" onkeyup="if(event.key==='Enter')searchResources()">
-      </div>
-      <div class="col-md-2">
-        <label class="form-label">类型</label>
-        <select id="res-type" class="form-select">
-          <option value="">全部</option>
-          <option value="movie">电影</option>
-          <option value="tv">剧集</option>
-          <option value="anime">动漫</option>
-          <option value="variety">综艺</option>
-          <option value="documentary">纪录片</option>
-        </select>
-      </div>
-      <div class="col-md-2">
-        <label class="form-label">年份</label>
-        <input id="res-year" class="form-control" type="number" placeholder="如 2024">
-      </div>
-      <div class="col-md-3">
-        <button class="btn-primary" onclick="searchResources()"><i class="bi bi-search me-1"></i>搜索</button>
-      </div>
+  <div class="res-toolbar">
+    <button id="res-tab-home" class="btn-sm-ghost active" onclick="switchResourceView('home')"><i class="bi bi-fire me-1"></i>TMDB 热门</button>
+    <button id="res-tab-local" class="btn-sm-ghost" onclick="switchResourceView('local')"><i class="bi bi-hdd-stack me-1"></i>本地资源</button>
+    <button id="res-tab-movie" class="btn-sm-ghost" onclick="switchResourceView('movie')"><i class="bi bi-film me-1"></i>电影</button>
+    <button id="res-tab-tv" class="btn-sm-ghost" onclick="switchResourceView('tv')"><i class="bi bi-tv me-1"></i>电视剧</button>
+  </div>
+
+  <div id="res-home-panel">
+    <div class="card mb-4" style="padding:16px">
+      <div class="res-section-title"><span><i class="bi bi-fire me-1"></i>TMDB 热门电影</span><span>点击海报搜索本地库</span></div>
+      <div id="res-popular-movies" class="resource-grid"></div>
+      <div class="res-section-title" style="margin-top:22px"><span><i class="bi bi-broadcast me-1"></i>TMDB 热门电视剧</span><span>点击海报搜索本地库</span></div>
+      <div id="res-popular-tv" class="resource-grid"></div>
     </div>
   </div>
-  <div id="res-total" style="font-size:.8rem;color:var(--muted);margin-bottom:12px"></div>
-  <div id="res-grid" class="resource-grid"></div>
-  <div class="pager" id="res-pager"></div>
+
+  <div id="res-local-panel" style="display:none">
+    <!-- Search bar -->
+    <div class="card mb-4" style="padding:16px">
+      <div class="row g-2 align-items-end">
+        <div class="col-md-5">
+          <label class="form-label">关键词</label>
+          <input id="res-kw" class="form-control" placeholder="标题搜索…" onkeyup="if(event.key==='Enter')searchResources()">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">类型</label>
+          <select id="res-type" class="form-select">
+            <option value="">全部</option>
+            <option value="movie">电影</option>
+            <option value="tv">电视剧</option>
+            <option value="anime">动漫</option>
+            <option value="variety">综艺</option>
+            <option value="documentary">纪录片</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">年份</label>
+          <input id="res-year" class="form-control" type="number" placeholder="如 2024">
+        </div>
+        <div class="col-md-3">
+          <button class="btn-primary" onclick="searchResources()"><i class="bi bi-search me-1"></i>搜索本地库</button>
+        </div>
+      </div>
+    </div>
+    <div id="res-total" style="font-size:.8rem;color:var(--muted);margin-bottom:12px"></div>
+    <div id="res-grid" class="resource-grid"></div>
+    <div class="pager" id="res-pager"></div>
+  </div>
 </div>
 
 <!-- ── Shares ── -->
@@ -506,6 +531,8 @@ tr:hover td { background: rgba(28,33,40,.6); }
 // ══════════════════════════════════════════════
 let currentPage = 'dashboard';
 let resPage = 0; const resLimit = 24;
+let resView = 'home';
+let currentResourceId = null;
 let sharesPage = 0; let sharesFilter = ''; const sharesLimit = 20;
 let tasksPage = 0; const tasksLimit = 20;
 let refreshTimer = null;
@@ -670,14 +697,70 @@ async function loadDashboard() {
 // ══════════════════════════════════════════════
 async function loadResources() {
   resPage = 0;
-  await renderResources();
+  await renderResourcesHome();
+}
+function switchResourceView(view) {
+  resView = view;
+  resPage = 0;
+
+  document.getElementById('res-home-panel').style.display = view === 'home' ? '' : 'none';
+  document.getElementById('res-local-panel').style.display = view === 'home' ? 'none' : '';
+
+  ['home','local','movie','tv'].forEach(k => {
+    const el = document.getElementById('res-tab-' + k);
+    if (el) el.classList.toggle('active', k === view);
+  });
+
+  if (view === 'home') {
+    renderResourcesHome();
+  } else {
+    const typeEl = document.getElementById('res-type');
+    if (typeEl) typeEl.value = (view === 'movie' || view === 'tv') ? view : '';
+    renderResources();
+  }
+}
+async function renderResourcesHome() {
+  switchResourcePanelsOnly('home');
+  await Promise.all([
+    renderPopularResources('movie', 'res-popular-movies'),
+    renderPopularResources('tv', 'res-popular-tv')
+  ]);
+}
+function switchResourcePanelsOnly(view) {
+  document.getElementById('res-home-panel').style.display = view === 'home' ? '' : 'none';
+  document.getElementById('res-local-panel').style.display = view === 'home' ? 'none' : '';
+  ['home','local','movie','tv'].forEach(k => {
+    const el = document.getElementById('res-tab-' + k);
+    if (el) el.classList.toggle('active', k === view);
+  });
+}
+async function renderPopularResources(type, targetId) {
+  const grid = document.getElementById(targetId);
+  grid.innerHTML = '<div style="text-align:center;padding:28px;color:var(--muted);grid-column:1/-1"><span class="spinner"></span></div>';
+  try {
+    const items = await api('GET', `/resources/popular?type=${type}&limit=12`);
+    grid.innerHTML = items.length ? items.map(r => resourceCardHtml(r, {
+      onClick: `searchLocalResource('${jsString(r.title)}','${type}')`,
+      isLocal: false
+    })).join('') : `<div style="grid-column:1/-1;color:var(--muted);padding:24px;text-align:center">暂无热门${typeLabel(type)}</div>`;
+  } catch(e) {
+    grid.innerHTML = `<div style="grid-column:1/-1;color:var(--red);padding:16px">${escHtml(e.message)}</div>`;
+  }
+}
+async function searchLocalResource(title, type) {
+  switchResourceView(type || 'local');
+  document.getElementById('res-kw').value = title;
+  document.getElementById('res-type').value = type || '';
+  document.getElementById('res-year').value = '';
+  await searchResources();
 }
 async function searchResources() {
+  if (resView === 'home') switchResourcePanelsOnly('local');
   resPage = 0;
   await renderResources();
 }
 async function renderResources() {
-  const kw   = document.getElementById('res-kw').value;
+  const kw   = document.getElementById('res-kw').value.trim();
   const type = document.getElementById('res-type').value;
   const year = document.getElementById('res-year').value;
   let qs = `?skip=${resPage * resLimit}&limit=${resLimit}`;
@@ -685,36 +768,51 @@ async function renderResources() {
   if (type) qs += '&type='    + encodeURIComponent(type);
   if (year) qs += '&year='    + encodeURIComponent(year);
   const grid = document.getElementById('res-grid');
-  grid.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)"><span class="spinner"></span></div>';
+  grid.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);grid-column:1/-1"><span class="spinner"></span></div>';
   try {
     const data = await api('GET', '/resources' + qs);
     const items = data.items || [];
     const total = data.total || 0;
-    document.getElementById('res-total').textContent = `共 ${total} 条结果`;
-    grid.innerHTML = items.length ? items.map(r => `
-      <div class="res-card" onclick="showResource(${r.id})">
-        <div class="res-poster-wrap">
-          ${r.poster_url
-            ? `<img class="res-poster" src="${escHtml(r.poster_url)}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
-            : ''}
-          <div class="res-poster-ph"${r.poster_url?' style="display:none"':''}><i class="bi bi-film"></i></div>
-          <div class="res-overlay">
-            <div class="res-overlay-title">${escHtml(r.title)}</div>
-            <div class="res-overlay-meta">${typeLabel(r.resource_type)}${r.year ? ' · ' + r.year : ''}</div>
-          </div>
-        </div>
-        <div class="res-info">
-          <div class="res-title" title="${escHtml(r.title)}">${escHtml(r.title)}</div>
-          <div class="res-meta">${typeLabel(r.resource_type)}${r.year ? ' · ' + r.year : ''}</div>
-        </div>
-      </div>`).join('')
-      : '<div style="text-align:center;padding:40px;color:var(--muted);grid-column:1/-1">暂无资源，先导入一些分享吧</div>';
+    const hint = kw ? ` · 关键词「${kw}」` : '';
+    document.getElementById('res-total').textContent = `本地库共 ${total} 条结果${hint}`;
+    grid.innerHTML = items.length ? items.map(r => resourceCardHtml(r, {
+      onClick: `showResource(${r.id})`,
+      isLocal: true
+    })).join('')
+      : '<div style="text-align:center;padding:40px;color:var(--muted);grid-column:1/-1">本地库暂无匹配资源，可先导入分享或点击 TMDB 热门项查看是否已收录</div>';
     renderPager('res-pager', resPage, Math.ceil(total / resLimit), p => { resPage = p; renderResources(); });
   } catch(e) {
     grid.innerHTML = `<div style="color:var(--red);grid-column:1/-1;padding:20px">${escHtml(e.message)}</div>`;
   }
 }
+function resourceCardHtml(r, opts = {}) {
+  const onClick = opts.onClick || '';
+  const isLocal = !!opts.isLocal;
+  const type = r.resource_type || 'other';
+  return `
+    <div class="res-card" onclick="${onClick}">
+      ${isLocal ? `<div class="res-card-actions"><button onclick="event.stopPropagation();deleteResource(${r.id})" title="删除资源并取消关联分享"><i class="bi bi-trash"></i></button></div>` : ''}
+      <div class="res-poster-wrap">
+        ${r.poster_url
+          ? `<img class="res-poster" src="${escHtml(r.poster_url)}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+          : ''}
+        <div class="res-poster-ph"${r.poster_url?' style="display:none"':''}><i class="bi bi-film"></i></div>
+        <div class="res-overlay">
+          <div class="res-overlay-title">${escHtml(r.title || '—')}</div>
+          <div class="res-overlay-meta">${typeLabel(type)}${r.year ? ' · ' + r.year : ''}${isLocal ? '' : ' · 搜索本地库'}</div>
+        </div>
+      </div>
+      <div class="res-info">
+        <div class="res-title" title="${escHtml(r.title || '—')}">${escHtml(r.title || '—')}</div>
+        <div class="res-meta">${typeLabel(type)}${r.year ? ' · ' + r.year : ''}</div>
+      </div>
+    </div>`;
+}
+function jsString(s) {
+  return String(s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r?\n/g, ' ');
+}
 async function showResource(id) {
+  currentResourceId = id;
   const modal = document.getElementById('res-modal');
   const body  = document.getElementById('res-modal-body');
   body.innerHTML = '<div style="text-align:center;padding:40px"><span class="spinner"></span></div>';
@@ -743,7 +841,6 @@ async function showResource(id) {
         <td style="color:var(--muted);font-size:.8rem">${fmtSize(f.file_size)}</td>
         <td style="color:var(--muted);font-size:.8rem">${escHtml(f.quality||'—')}</td>
       </tr>`).join('');
-    // hero backdrop
     const heroArea = document.getElementById('res-hero-area');
     if (r.backdrop_url) {
       heroArea.innerHTML = `<div class="res-hero-wrap"><img class="res-hero-img" src="${escHtml(r.backdrop_url)}" loading="lazy" onerror="this.parentElement.style.display='none'"><div class="res-hero-gradient"></div></div>`;
@@ -754,8 +851,13 @@ async function showResource(id) {
       <div style="display:flex;gap:20px;margin-bottom:20px;align-items:flex-start">
         ${r.poster_url ? `<img src="${escHtml(r.poster_url)}" style="width:110px;min-width:110px;border-radius:6px;object-fit:cover;box-shadow:0 4px 16px rgba(0,0,0,.4)" loading="lazy">` : ''}
         <div style="flex:1;min-width:0">
-          <h2 style="font-size:1.25rem;margin:0 0 4px;line-height:1.3">${escHtml(r.title)}</h2>
-          ${r.original_title ? `<div style="color:var(--muted);font-size:.82rem;margin-bottom:8px">${escHtml(r.original_title)}</div>` : ''}
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+            <div style="min-width:0">
+              <h2 style="font-size:1.25rem;margin:0 0 4px;line-height:1.3">${escHtml(r.title)}</h2>
+              ${r.original_title ? `<div style="color:var(--muted);font-size:.82rem;margin-bottom:8px">${escHtml(r.original_title)}</div>` : ''}
+            </div>
+            <button class="btn-sm-danger" onclick="deleteResource(${r.id})" style="white-space:nowrap"><i class="bi bi-trash me-1"></i>删除资源</button>
+          </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center">
             ${r.year ? `<span class="badge-completed">${r.year}</span>` : ''}
             <span class="badge-pending">${typeLabel(r.resource_type)}</span>
@@ -780,7 +882,22 @@ async function showResource(id) {
     body.innerHTML = `<div style="color:var(--red)">${escHtml(e.message)}</div>`;
   }
 }
-function closeModal() { document.getElementById('res-modal').classList.remove('open'); }
+async function deleteResource(id) {
+  if (!confirm(`确认删除资源 #${id}？\n将同时取消并删除关联分享链接，本地资源文件索引也会删除。`)) return;
+  try {
+    const r = await api('DELETE', '/resources/' + id);
+    toast(`资源 #${id} 已删除，取消分享 ${r.shares_canceled || 0} 个`, 'success');
+    closeModal();
+    if (currentPage === 'resources') {
+      if (resView === 'home') renderResourcesHome(); else renderResources();
+    }
+    if (currentPage === 'shares') renderShares();
+  } catch(e) { toast(e.message, 'error'); }
+}
+function closeModal() {
+  currentResourceId = null;
+  document.getElementById('res-modal').classList.remove('open');
+}
 
 // ══════════════════════════════════════════════
 // Shares
@@ -859,11 +976,15 @@ async function rebuildShare(id) {
   } catch(e) { toast(e.message, 'error'); }
 }
 async function deleteShare(id) {
-  if (!confirm(`确认删除分享 #${id}？\n将同时取消 115 云端分享链接并删除本地记录。`)) return;
+  if (!confirm(`确认删除分享 #${id}？\n将同时取消 115 云端分享链接并删除本地记录；如果这是资源最后一个分享，资源库记录也会同步删除。`)) return;
   try {
-    await api('DELETE', '/shares/' + id);
-    toast(`分享 #${id} 已删除`, 'success');
+    const r = await api('DELETE', '/shares/' + id);
+    toast(r.resource_deleted ? `分享 #${id} 已删除，关联资源已同步删除` : `分享 #${id} 已删除`, 'success');
+    if (currentResourceId && r.resource_deleted) closeModal();
     if (currentPage === 'shares') renderShares();
+    if (currentPage === 'resources') {
+      if (resView === 'home') renderResourcesHome(); else renderResources();
+    }
   } catch(e) { toast(e.message, 'error'); }
 }
 

@@ -4,7 +4,7 @@ use tracing::{info, warn};
 use crate::{
     adapters::{Adapter115, FileEntry},
     config::Config,
-    utils::{is_ad_file, is_video_file, parse_file_name},
+    utils::{is_ad_file, is_video_file, parse_file_name, ParsedFileName},
 };
 
 use super::tmdb::TmdbResult;
@@ -31,13 +31,14 @@ impl<'a> Organizer<'a> {
         &self,
         files: &[FileEntry],
         tmdb: Option<&TmdbResult>,
+        inferred: Option<&ParsedFileName>,
     ) -> Result<Vec<OrganizerResult>> {
         let min_video_bytes = self.config.clean_min_video_size_mb as i64 * 1024 * 1024;
         let root_folder = &self.config.account_115_root_folder_id;
 
         // 若有 TMDB 结果，在目标目录下为本次资源创建子目录
         let target_folder = self
-            .ensure_target_folder(tmdb, root_folder)
+            .ensure_target_folder(tmdb, inferred, root_folder)
             .await
             .unwrap_or_else(|_| root_folder.clone());
 
@@ -133,6 +134,7 @@ impl<'a> Organizer<'a> {
     async fn ensure_target_folder(
         &self,
         tmdb: Option<&TmdbResult>,
+        inferred: Option<&ParsedFileName>,
         root_folder: &str,
     ) -> Result<String> {
         if root_folder.is_empty() || root_folder == "0" {
@@ -154,8 +156,9 @@ impl<'a> Organizer<'a> {
             .year()
             .map(|y| format!(" ({})", y))
             .unwrap_or_default();
-        // 去掉文件名中不能出现的字符
-        let safe_title = sanitize_name(tmdb.title());
+        // 去掉文件名中不能出现的字符。若本地解析出中文标题且 TMDB 返回英文标题，
+        // 优先使用本地中文标题，避免成品目录被重命名成英文名。
+        let safe_title = sanitize_name(&preferred_title(tmdb, inferred.map(|p| p.title.as_str())));
 
         // 剧集文件夹名带 tmdb_id，电影文件夹名不带。
         // 资源目录名始终使用 TMDB 中文标题 + 年份；电影/剧集通过上层“电影/电视剧”目录区分。
@@ -209,15 +212,11 @@ pub fn build_standard_name(original: &str, tmdb: Option<&TmdbResult>) -> Option<
         return None;
     }
 
-    // 优先使用 TMDB 标准片名，否则用解析出的标题
-    let title = if let Some(t) = tmdb {
-        sanitize_name(t.title())
-    } else {
-        if parsed.title.is_empty() {
-            return None;
-        }
-        parsed.title.clone()
-    };
+    let title = preferred_title(tmdb, Some(parsed.title.as_str()));
+    if title.is_empty() {
+        return None;
+    }
+    let title = sanitize_name(&title);
 
     let year = tmdb.and_then(|t| t.year()).or(parsed.year);
     let year_str = year
@@ -246,6 +245,31 @@ pub fn build_standard_name(original: &str, tmdb: Option<&TmdbResult>) -> Option<
         "{}{}{}{}{}.{}",
         title, year_str, se_str, quality_str, tmdb_suffix, parsed.ext
     ))
+}
+
+/// 优先标题策略：
+/// - TMDB 有中文标题时使用 TMDB 标题；
+/// - 本地文件名解析出中文标题且 TMDB 标题不是中文时，使用本地中文标题；
+/// - 否则使用 TMDB 标题；
+/// - 没有 TMDB 时使用本地解析标题。
+fn preferred_title(tmdb: Option<&TmdbResult>, local_title: Option<&str>) -> String {
+    let local_title = local_title.map(str::trim).filter(|s| !s.is_empty());
+    let tmdb_title = tmdb.map(|t| t.title().trim()).filter(|s| !s.is_empty());
+
+    match (tmdb_title, local_title) {
+        (Some(t), Some(local)) if contains_cjk(local) && !contains_cjk(t) => local.to_string(),
+        (Some(t), _) => t.to_string(),
+        (None, Some(local)) => local.to_string(),
+        (None, None) => String::new(),
+    }
+}
+
+fn contains_cjk(s: &str) -> bool {
+    s.chars().any(|c| {
+        ('\u{4e00}'..='\u{9fff}').contains(&c)
+            || ('\u{3400}'..='\u{4dbf}').contains(&c)
+            || ('\u{f900}'..='\u{faff}').contains(&c)
+    })
 }
 
 /// 移除文件名中不合法的字符（Windows/115 均适用）

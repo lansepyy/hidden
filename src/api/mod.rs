@@ -36,7 +36,11 @@ pub fn router() -> Router<AppState> {
         )
         // 资源搜索
         .route("/resources", get(resources::list_resources))
-        .route("/resources/:id", get(resources::get_resource))
+        .route("/resources/popular", get(resources::popular_resources))
+        .route(
+            "/resources/:id",
+            get(resources::get_resource).delete(resources::delete_resource),
+        )
         .route("/resources/:id/shares", get(resources::get_resource_shares))
         .route("/resources/:id/files", get(resources::get_resource_files))
         // 115 文件夹浏览（设置页用）

@@ -300,7 +300,7 @@ async fn process_task(state: AppState, task_id: i64) -> Result<()> {
 
     // 执行整理（删广告 + 重命名 + 移动）
     let organize_results = Organizer::new(&adapter, &runtime_config)
-        .organize(&media_files, tmdb_result.as_ref())
+        .organize(&media_files, tmdb_result.as_ref(), inferred.as_ref())
         .await
         .unwrap_or_else(|e| {
             warn!("整理步骤出错（非致命，继续执行）：{:?}", e);
@@ -321,13 +321,7 @@ async fn process_task(state: AppState, task_id: i64) -> Result<()> {
     // ── Step 5: 创建新分享 ───────────────────────
     update_task_step(&state.db, task_id, "sharing", "创建分享链接").await;
 
-    let share_file_ids: Vec<String> = if !organize_results.is_empty() {
-        organize_results.iter().map(|r| r.file_id.clone()).collect()
-    } else {
-        // 整理失败或源分享顶层为文件夹时，退回任务临时目录中的真实云盘条目 ID。
-        // 这里不能使用源分享文件 ID；同时不能过滤目录，否则文件夹型分享会完成但不生成新分享。
-        temp_files.iter().filter_map(|f| f.file_id.clone()).collect()
-    };
+    let share_file_ids = build_share_file_ids(&organize_results, &temp_files);
 
     if !share_file_ids.is_empty() {
         // 检查分享限速
@@ -348,18 +342,7 @@ async fn process_task(state: AppState, task_id: i64) -> Result<()> {
         }
 
         let id_refs: Vec<&str> = share_file_ids.iter().map(|s| s.as_str()).collect();
-        let share_title = tmdb_result
-            .as_ref()
-            .map(|t| {
-                let year_str = t.year().map(|y| format!(" ({})", y)).unwrap_or_default();
-                format!("{}{}", t.title(), year_str)
-            })
-            .or_else(|| {
-                inferred.as_ref().map(|p| {
-                    let year_str = p.year.map(|y| format!(" ({})", y)).unwrap_or_default();
-                    format!("{}{}", p.title, year_str)
-                })
-            })
+        let share_title = build_display_title(tmdb_result.as_ref(), inferred.as_ref())
             .unwrap_or_else(|| format!("Hidden 导入任务 #{}", task_id));
 
         match adapter.create_share(&id_refs, Some(&share_title), 7).await {
@@ -386,6 +369,22 @@ async fn process_task(state: AppState, task_id: i64) -> Result<()> {
                 .await?;
 
                 info!("🔗 任务 #{} 分享链接已创建：{}", task_id, share_result.share_url);
+
+                if organize_results.is_empty() {
+                    warn!(
+                        "任务 #{} 整理结果为空，分享目标仍可能位于临时目录，跳过源文件清理",
+                        task_id
+                    );
+                } else {
+                    cleanup_task_temp_folder_after_share(
+                        &adapter,
+                        &runtime_config.account_115_temp_folder_id,
+                        &task_temp_folder,
+                        &task_temp_folder_name,
+                        task_id,
+                    )
+                    .await;
+                }
             }
             Err(e) => {
                 warn!("任务 #{} 创建分享失败（非致命）：{:?}", task_id, e);
@@ -450,6 +449,156 @@ async fn collect_files_recursive(
     Ok(())
 }
 
+/// 构建用于创建分享的条目 ID。
+///
+/// 优先分享整理后的“资源目录 + 文件”组合：
+/// - 资源目录用于让分享接收方看到完整文件夹结构；
+/// - 文件 ID 作为兜底，避免某些 115 分享接口只分享目录时漏文件。
+/// 若整理失败，则回退到任务临时目录第一层的文件/目录 ID。
+fn build_share_file_ids(
+    organize_results: &[crate::services::organizer::OrganizerResult],
+    temp_files: &[FileEntry],
+) -> Vec<String> {
+    let mut ids = Vec::<String>::new();
+
+    if organize_results.is_empty() {
+        for entry in temp_files {
+            if let Some(id) = entry.file_id.as_deref() {
+                push_unique_id(&mut ids, id);
+            }
+        }
+        return ids;
+    }
+
+    for result in organize_results {
+        if !result.folder_id.is_empty() && result.folder_id != "0" {
+            push_unique_id(&mut ids, &result.folder_id);
+        }
+    }
+
+    for result in organize_results {
+        push_unique_id(&mut ids, &result.file_id);
+    }
+
+    ids
+}
+
+fn build_display_title(
+    tmdb: Option<&crate::services::tmdb::TmdbResult>,
+    inferred: Option<&crate::utils::ParsedFileName>,
+) -> Option<String> {
+    let title = preferred_resource_title(tmdb, inferred)?;
+    let year = tmdb.and_then(|t| t.year()).or_else(|| inferred.and_then(|p| p.year));
+    let year_str = year.map(|y| format!(" ({})", y)).unwrap_or_default();
+    Some(format!("{}{}", title, year_str))
+}
+
+fn preferred_resource_title(
+    tmdb: Option<&crate::services::tmdb::TmdbResult>,
+    inferred: Option<&crate::utils::ParsedFileName>,
+) -> Option<String> {
+    let inferred_title = inferred
+        .map(|p| p.title.trim())
+        .filter(|title| !title.is_empty());
+
+    let tmdb_title = tmdb.map(|t| t.title().trim()).filter(|title| !title.is_empty());
+
+    match (tmdb_title, inferred_title) {
+        (Some(t), Some(local)) if contains_cjk(local) && !contains_cjk(t) => Some(local.to_string()),
+        (Some(t), _) => Some(t.to_string()),
+        (None, Some(local)) => Some(local.to_string()),
+        (None, None) => None,
+    }
+}
+
+fn contains_cjk(s: &str) -> bool {
+    s.chars().any(|c| {
+        ('\u{4e00}'..='\u{9fff}').contains(&c)
+            || ('\u{3400}'..='\u{4dbf}').contains(&c)
+            || ('\u{f900}'..='\u{faff}').contains(&c)
+    })
+}
+
+fn push_unique_id(ids: &mut Vec<String>, id: &str) {
+    if id.trim().is_empty() {
+        return;
+    }
+    if !ids.iter().any(|existing| existing == id) {
+        ids.push(id.to_string());
+    }
+}
+
+/// 分享创建成功后清理任务专属临时目录。
+///
+/// 安全措施：
+/// 1. 只删除 `ACCOUNT_115_TEMP_FOLDER_ID` 下本任务创建的 `hidden-task-{id}` 目录；
+/// 2. 临时根目录为空/根目录时拒绝删除；
+/// 3. 删除前重新列出临时根目录确认目录 ID 和目录名均匹配；
+/// 4. 只删除任务目录本身，不直接按媒体文件 ID 删除，避免误删成品目录内容。
+async fn cleanup_task_temp_folder_after_share(
+    adapter: &Adapter115,
+    configured_temp_root: &str,
+    task_temp_folder: &str,
+    task_temp_folder_name: &str,
+    task_id: i64,
+) {
+    if configured_temp_root.trim().is_empty() || configured_temp_root == "0" {
+        warn!(
+            "任务 #{} 跳过源文件清理：未配置安全的临时目录 ACCOUNT_115_TEMP_FOLDER_ID",
+            task_id
+        );
+        return;
+    }
+
+    if task_temp_folder.trim().is_empty()
+        || task_temp_folder == "0"
+        || task_temp_folder == configured_temp_root
+        || !task_temp_folder_name.starts_with("hidden-task-")
+    {
+        warn!(
+            "任务 #{} 跳过源文件清理：临时目录参数异常 root={} folder={} name={}",
+            task_id, configured_temp_root, task_temp_folder, task_temp_folder_name
+        );
+        return;
+    }
+
+    let entries = match adapter.list_files(configured_temp_root).await {
+        Ok(entries) => entries,
+        Err(e) => {
+            warn!(
+                "任务 #{} 跳过源文件清理：无法列出配置临时目录 {}：{:?}",
+                task_id, configured_temp_root, e
+            );
+            return;
+        }
+    };
+
+    let confirmed = entries.iter().any(|entry| {
+        entry.is_dir
+            && entry.name == task_temp_folder_name
+            && entry.file_id.as_deref() == Some(task_temp_folder)
+    });
+
+    if !confirmed {
+        warn!(
+            "任务 #{} 跳过源文件清理：{} 不在配置临时目录 {} 下，避免误删",
+            task_id, task_temp_folder_name, configured_temp_root
+        );
+        return;
+    }
+
+    match adapter.delete_files(&[task_temp_folder]).await {
+        Ok(_) => info!(
+            "🧹 任务 #{} 分享后已安全删除源临时目录：{} ({})",
+            task_id, task_temp_folder_name, task_temp_folder
+        ),
+        Err(e) => warn!(
+            "任务 #{} 分享后删除源临时目录失败（分享已创建）：{:?}",
+            task_id, e
+        ),
+    }
+}
+
 /// 写入资源与文件索引，保证前端资源库能展示导入结果。
 async fn upsert_resource_and_files(
     db: &sqlx::PgPool,
@@ -458,12 +607,7 @@ async fn upsert_resource_and_files(
     media_files: &[FileEntry],
     organize_results: &[crate::services::organizer::OrganizerResult],
 ) -> Option<i64> {
-    let fallback_title = inferred
-        .map(|p| p.title.trim())
-        .filter(|title| !title.is_empty())
-        .unwrap_or("未识别资源");
-
-    let title = tmdb.map(|t| t.title()).unwrap_or(fallback_title);
+    let title = preferred_resource_title(tmdb, inferred).unwrap_or_else(|| "未识别资源".to_string());
     let original_title = tmdb.map(|t| t.original_title());
     let year = tmdb.and_then(|t| t.year()).or_else(|| inferred.and_then(|p| p.year));
     let resource_type = tmdb
@@ -489,7 +633,7 @@ async fn upsert_resource_and_files(
         RETURNING id
         "#,
     )
-    .bind(title)
+    .bind(&title)
     .bind(original_title)
     .bind(year)
     .bind(resource_type)

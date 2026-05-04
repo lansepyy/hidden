@@ -336,6 +336,8 @@ pub async fn rebuild_share(
 
 // ─────────────────────────────────────────────
 // DELETE /api/shares/:id  →  删除分享记录（同时取消 115 云端分享）
+//
+// 若该分享是资源的最后一个关联分享，同时删除资源库记录，避免“源链接已删除但资源库内容仍展示”。
 // ─────────────────────────────────────────────
 
 pub async fn delete_share(
@@ -374,9 +376,38 @@ pub async fn delete_share(
         .execute(&state.db)
         .await?;
 
+    let mut resource_deleted = false;
+    if let Some(resource_id) = share.resource_id {
+        let remaining: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM shares WHERE resource_id = $1",
+        )
+        .bind(resource_id)
+        .fetch_one(&state.db)
+        .await?;
+
+        if remaining == 0 {
+            let rows = sqlx::query("DELETE FROM resources WHERE id = $1")
+                .bind(resource_id)
+                .execute(&state.db)
+                .await?
+                .rows_affected();
+            resource_deleted = rows > 0;
+            tracing::info!(
+                "🗑️ 分享 #{} 删除后资源 #{} 已无关联分享，自动删除资源记录：{}",
+                id,
+                resource_id,
+                resource_deleted
+            );
+        }
+    }
+
     tracing::info!("🗑️ 删除分享记录 #{}", id);
 
-    Ok(Json(serde_json::json!({ "deleted": true, "share_id": id })))
+    Ok(Json(serde_json::json!({
+        "deleted": true,
+        "share_id": id,
+        "resource_deleted": resource_deleted,
+    })))
 }
 
 // ─────────────────────────────────────────────
