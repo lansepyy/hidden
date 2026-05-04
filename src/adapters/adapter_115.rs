@@ -259,10 +259,18 @@ impl Adapter115 {
             let count = data["count"].as_u64().unwrap_or(0) as usize;
 
             for f in &files {
-                let is_dir = f["ico"].as_str() == Some("folder") || f["is_dir"].as_i64().unwrap_or(0) == 1;
-                let file_id = value_to_string(&f["fid"])
-                    .or_else(|| value_to_string(&f["file_id"]))
-                    .or_else(|| if is_dir { value_to_string(&f["cid"]) } else { None });
+                // p115client: is_dir = "fid" not in info
+                // 目录无 fid 字段，其自身 ID 在 cid；文件有 fid 且 cid 为父目录 ID
+                let is_dir = f["fid"].is_null()
+                    || f["ico"].as_str() == Some("folder")
+                    || f["is_dir"].as_i64().unwrap_or(0) == 1;
+                let file_id = if is_dir {
+                    value_to_string(&f["cid"])
+                        .or_else(|| value_to_string(&f["fid"]))
+                } else {
+                    value_to_string(&f["fid"])
+                        .or_else(|| value_to_string(&f["file_id"]))
+                };
 
                 all_files.push(FileEntry {
                     name: f["n"].as_str().or_else(|| f["file_name"].as_str()).unwrap_or("").to_string(),
@@ -393,11 +401,18 @@ impl Adapter115 {
         let entries: Vec<FileEntry> = data_arr
             .iter()
             .map(|f| {
-                let is_dir =
-                    f["ico"].as_str() == Some("folder") || f["is_dir"].as_i64().unwrap_or(0) == 1;
-                let file_id = value_to_string(&f["fid"])
-                    .or_else(|| value_to_string(&f["file_id"]))
-                    .or_else(|| if is_dir { value_to_string(&f["cid"]) } else { None });
+                // p115client: is_dir = "fid" not in info
+                // 目录无 fid 字段，其自身 ID 在 cid；文件有 fid 且 cid 为父目录 ID
+                let is_dir = f["fid"].is_null()
+                    || f["ico"].as_str() == Some("folder")
+                    || f["is_dir"].as_i64().unwrap_or(0) == 1;
+                let file_id = if is_dir {
+                    value_to_string(&f["cid"])
+                        .or_else(|| value_to_string(&f["fid"]))
+                } else {
+                    value_to_string(&f["fid"])
+                        .or_else(|| value_to_string(&f["file_id"]))
+                };
 
                 FileEntry {
                     name: f["n"]
