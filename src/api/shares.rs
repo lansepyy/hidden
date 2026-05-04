@@ -3,7 +3,8 @@ use axum::{
     Json,
 };
 use chrono::Utc;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
 
 use crate::{
     db::Share,
@@ -30,6 +31,34 @@ fn default_limit() -> i64 {
 }
 
 // ─────────────────────────────────────────────
+// 响应结构体
+// ─────────────────────────────────────────────
+
+/// 分享列表项：在 shares 基础上 JOIN resources，便于前端直接展示
+/// “115 分享链接 + TMDB 名称/ID” 的对应关系。
+#[derive(Debug, Serialize, FromRow)]
+pub struct ShareListItem {
+    pub id: i64,
+    pub resource_id: Option<i64>,
+    pub share_url: String,
+    pub pick_code: Option<String>,
+    pub share_code: Option<String>,
+    pub share_title: Option<String>,
+    pub share_type: Option<String>,
+    pub file_count: Option<i32>,
+    pub total_size: Option<i64>,
+    pub status: String,
+    pub last_checked_at: Option<chrono::DateTime<Utc>>,
+    pub created_at: chrono::DateTime<Utc>,
+    /// TMDB 匹配后的资源名称（resources.title）
+    pub resource_title: Option<String>,
+    pub resource_original_title: Option<String>,
+    pub resource_year: Option<i32>,
+    pub resource_type: Option<String>,
+    pub tmdb_id: Option<i64>,
+}
+
+// ─────────────────────────────────────────────
 // GET /api/shares  →  分享列表（支持状态过滤）
 // ─────────────────────────────────────────────
 
@@ -51,15 +80,31 @@ pub async fn list_shares(
             .await?
     };
 
-    let rows: Vec<Share> = if let Some(ref status) = params.status {
-        sqlx::query_as::<_, Share>(
+    let rows: Vec<ShareListItem> = if let Some(ref status) = params.status {
+        sqlx::query_as::<_, ShareListItem>(
             r#"
-            SELECT id, resource_id, share_url, pick_code, share_code,
-                   share_title, share_type, file_count, total_size,
-                   status, last_checked_at, created_at
-            FROM shares
-            WHERE status = $1
-            ORDER BY created_at DESC
+            SELECT
+                s.id,
+                s.resource_id,
+                s.share_url,
+                s.pick_code,
+                s.share_code,
+                s.share_title,
+                s.share_type,
+                s.file_count,
+                s.total_size,
+                s.status,
+                s.last_checked_at,
+                s.created_at,
+                r.title AS resource_title,
+                r.original_title AS resource_original_title,
+                r.year AS resource_year,
+                r.resource_type AS resource_type,
+                r.tmdb_id AS tmdb_id
+            FROM shares s
+            LEFT JOIN resources r ON r.id = s.resource_id
+            WHERE s.status = $1
+            ORDER BY s.created_at DESC
             LIMIT $2 OFFSET $3
             "#,
         )
@@ -69,13 +114,29 @@ pub async fn list_shares(
         .fetch_all(&state.db)
         .await?
     } else {
-        sqlx::query_as::<_, Share>(
+        sqlx::query_as::<_, ShareListItem>(
             r#"
-            SELECT id, resource_id, share_url, pick_code, share_code,
-                   share_title, share_type, file_count, total_size,
-                   status, last_checked_at, created_at
-            FROM shares
-            ORDER BY created_at DESC
+            SELECT
+                s.id,
+                s.resource_id,
+                s.share_url,
+                s.pick_code,
+                s.share_code,
+                s.share_title,
+                s.share_type,
+                s.file_count,
+                s.total_size,
+                s.status,
+                s.last_checked_at,
+                s.created_at,
+                r.title AS resource_title,
+                r.original_title AS resource_original_title,
+                r.year AS resource_year,
+                r.resource_type AS resource_type,
+                r.tmdb_id AS tmdb_id
+            FROM shares s
+            LEFT JOIN resources r ON r.id = s.resource_id
+            ORDER BY s.created_at DESC
             LIMIT $1 OFFSET $2
             "#,
         )
