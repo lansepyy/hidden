@@ -359,14 +359,32 @@ impl Adapter115 {
     pub async fn create_folder(&self, parent_id: &str, name: &str) -> anyhow::Result<String> {
         // Cookie 登录模式不能调用 OpenAPI `/open/folder/add`，否则 115 会返回
         // “access_token 格式错误”。参考 P115client，Cookie 模式应使用 webapi
-        // `POST /files/add`，参数为 `{ name, pid }`。
+        // `POST /files/add`。
+        //
+        // 115 webapi 创建目录的目录名参数是 `cname`，不是 `name`。使用
+        // `name` 时接口可能只返回 state=false 且没有 message/msg，导致上层只看到
+        // “创建文件夹失败：unknown”。
         let url = format!("{}/files/add", Self::WEBAPI);
-        let form = [("name", name), ("pid", parent_id)];
+        let form = [("cname", name), ("pid", parent_id)];
         let borrowed: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, *v)).collect();
 
         let resp = self.post_with_retry(&url, &borrowed).await?;
         if !state_bool(&resp) {
-            bail!("创建文件夹失败：{}", resp["message"].as_str().or_else(|| resp["msg"].as_str()).unwrap_or("unknown"));
+            let errno = resp["errno"].as_i64().unwrap_or(0);
+            let msg = resp["message"]
+                .as_str()
+                .or_else(|| resp["msg"].as_str())
+                .or_else(|| resp["error"].as_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("unknown");
+            bail!(
+                "创建文件夹失败 [errno={}]：{}（parent_id={}, name={}, raw={}）",
+                errno,
+                msg,
+                parent_id,
+                name,
+                resp
+            );
         }
 
         let folder_id = value_to_string(&resp["data"]["file_id"])
