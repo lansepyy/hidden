@@ -50,17 +50,21 @@ pub async fn get_stats(State(state): State<AppState>) -> Result<Json<Value>> {
             .fetch_one(&state.db)
             .await?;
 
-    // 获取 115 存储配额（失败时不阻断响应）
-    let quota = match state.build_adapter().await {
+    // 获取 115 存储配额（失败时不阻断响应，但返回错误信息以便前端提示）
+    let mut quota = json!(null);
+    let mut quota_error = json!(null);
+    match state.build_adapter().await {
         Ok(adapter) => match adapter.get_quota().await {
-            Ok(q) => json!({
-                "total": q.total,
-                "used": q.used,
-                "free": q.free,
-            }),
-            Err(_) => json!(null),
+            Ok(q) => {
+                quota = json!({
+                    "total": q.total,
+                    "used": q.used,
+                    "free": q.free,
+                });
+            }
+            Err(e) => quota_error = json!(format!("{}", e)),
         },
-        Err(_) => json!(null),
+        Err(e) => quota_error = json!(format!("{}", e)),
     };
 
     Ok(Json(json!({
@@ -75,7 +79,8 @@ pub async fn get_stats(State(state): State<AppState>) -> Result<Json<Value>> {
             "pending": tasks_pending,
             "failed": tasks_failed
         },
-        "quota": quota
+        "quota": quota,
+        "quota_error": quota_error
     })))
 }
 

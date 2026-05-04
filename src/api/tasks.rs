@@ -45,6 +45,11 @@ fn default_limit() -> i64 {
     20
 }
 
+#[derive(Debug, Deserialize)]
+pub struct DeleteTaskQuery {
+    pub force: Option<bool>,
+}
+
 /// 任务响应结构
 #[derive(Debug, Serialize)]
 pub struct TaskResponse {
@@ -107,29 +112,38 @@ pub async fn create_task(
     if raw_url.is_empty() {
         return Err(AppError::BadRequest("share_url 不能为空".to_string()));
     }
+    // 宽松校验：必须包含 "/s/" 且来自 115 相关域名，避免误拒绝常见子域/镜像
+    let valid_host = raw_url.contains("/s/") && (raw_url.contains("115.com") || raw_url.contains("115cdn.com"));
+    if !valid_host {
+        return Err(AppError::BadRequest(
+            "分享链接格式无效，仅支持 115 的分享链接".to_string(),
+        ));
+    }
 
-    // 自动从 URL 的 ?password= 或 &password= 参数提取提取码（pick_code）
-    // 示例：https://115cdn.com/s/swwshg73wrb?password=jbe0
+    // 自动从 URL 的查询参数提取提取码（常见参数名：password / pwd / pick_code / code）
     let pick_code = req.pick_code.clone().or_else(|| {
         raw_url.split_once('?').and_then(|(_, qs)| {
             qs.split('&').find_map(|pair| {
                 let (k, v) = pair.split_once('=')?;
-                if k == "password" && !v.is_empty() {
-                    Some(v.to_string())
-                } else {
-                    None
+                match k {
+                    "password" | "pwd" | "pick_code" | "code" => {
+                        if !v.is_empty() { Some(v.to_string()) } else { None }
+                    }
+                    _ => None,
                 }
             })
         })
     });
 
-    // 存入数据库时移除 URL 中的 password 参数（避免泄露）
+    // 存入数据库时移除常见提取码参数（避免泄露）
     let clean_url = raw_url
         .split_once('?')
         .map(|(base, qs)| {
             let filtered: Vec<&str> = qs
                 .split('&')
-                .filter(|p| !p.starts_with("password="))
+                .filter(|p| {
+                    !(p.starts_with("password=") || p.starts_with("pwd=") || p.starts_with("pick_code=") || p.starts_with("code="))
+                })
                 .collect();
             if filtered.is_empty() {
                 base.to_string()
@@ -329,6 +343,7 @@ pub async fn cancel_task(
 pub async fn delete_task(
     State(state): State<AppState>,
     Path(id): Path<i64>,
+    Query(q): Query<DeleteTaskQuery>,
 ) -> Result<Json<serde_json::Value>> {
     let task = sqlx::query_as::<_, ImportTask>(
         r#"
@@ -343,12 +358,17 @@ pub async fn delete_task(
     .await?
     .ok_or_else(|| AppError::NotFound(format!("任务 #{} 不存在", id)))?;
 
-    // 运行中的任务不允许删除（waiting_space 是卡住的空间等待，允许删除）
-    if matches!(task.status.as_str(), "parsing" | "transferring" | "organizing" | "sharing") {
+    // 运行中的任务默认不允许删除（waiting_space 是卡住的空间等待，允许删除）
+    let force = q.force.unwrap_or(false);
+    if !force && matches!(task.status.as_str(), "parsing" | "transferring" | "organizing" | "sharing") {
         return Err(AppError::BadRequest(format!(
-            "任务正在运行中（{}），请先取消再删除",
+            "任务正在运行中（{}），请先取消再删除；如确需删除可使用 ?force=true",
             task.status
         )));
+    }
+
+    if force {
+        tracing::warn!("⚠️  强制删除任务 #{}（status={}）", id, task.status);
     }
 
     sqlx::query("DELETE FROM import_tasks WHERE id = $1")

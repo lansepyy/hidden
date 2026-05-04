@@ -466,7 +466,7 @@ tr:hover td { background: rgba(28,33,40,.6); }
       </select>
       <span id="log-level-badge" style="font-size:.72rem;color:var(--muted)"></span>
       <span class="log-auto-badge"><span class="live-dot"></span>自动刷新 5s</span>
-      <button class="btn-sm-ghost" onclick="loadLogs()"><i class="bi bi-arrow-clockwise"></i> 刷新</button>
+      <button class="btn-sm-ghost" onclick="loadLogs(true)"><i class="bi bi-arrow-clockwise"></i> 刷新</button>
     </div>
   </div>
   <div class="log-filter-bar" id="log-filter-bar">
@@ -515,6 +515,7 @@ let refreshTimer = null;
 // ══════════════════════════════════════════════
 function navigate(page) {
   if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+  if (logsRefreshTimer) { clearInterval(logsRefreshTimer); logsRefreshTimer = null; }
   currentPage = page;
   document.querySelectorAll('[data-page]').forEach(el => el.classList.toggle('active', el.dataset.page === page));
   document.querySelectorAll('.page').forEach(el => el.classList.toggle('active', el.id === 'page-' + page));
@@ -524,7 +525,7 @@ function navigate(page) {
     case 'shares':    loadShares();    break;
     case 'tasks':     loadTasks(); startTasksAutoRefresh(); break;
     case 'settings':  loadSettings();  break;
-    case 'logs':      loadLogs(); startLogsAutoRefresh(); break;
+    case 'logs':      loadLogs(true); startLogsAutoRefresh(); break;
   }
 }
 
@@ -621,6 +622,16 @@ async function loadDashboard() {
       const fill = document.getElementById('s-quota-bar-fill');
       fill.style.width = pct + '%';
       fill.style.background = pct > 90 ? 'var(--red)' : pct > 70 ? 'var(--yellow)' : 'var(--blue)';
+    } else if (stats.quota_error) {
+      // 显示更友好的错误提示（例如 Cookie 未配置、网络/权限问题）
+      document.getElementById('s-quota-free').textContent = '—';
+      document.getElementById('s-quota-total').textContent = '—';
+      document.getElementById('s-quota-pct').textContent = '配额获取失败';
+      const fill = document.getElementById('s-quota-bar-fill');
+      fill.style.width = '0%';
+      fill.style.background = 'var(--muted)';
+      const freeEl = document.getElementById('s-quota-free');
+      if (freeEl) freeEl.title = stats.quota_error;
     }
     // Recent tasks
     const tasks = await api('GET', '/tasks?limit=8&skip=0');
@@ -1007,19 +1018,21 @@ const STATUS_COLOR = {
   verifying: 'var(--blue)', waiting_space: 'var(--yellow)',
 };
 
-async function loadLogs() {
+async function loadLogs(syncLevel = false) {
   const el = document.getElementById('log-list');
-  // 同步当前日志级别显示
-  try {
-    const lvl = await api('GET', '/logs/level');
-    const sel = document.getElementById('log-level-select');
-    if (sel) {
-      // 匹配最接近的选项
-      const opt = [...sel.options].find(o => o.value === lvl.level);
-      if (opt) sel.value = lvl.level;
-      document.getElementById('log-level-badge').textContent = '(当前: ' + lvl.level.split(',')[0] + ')';
-    }
-  } catch(_) {}
+  // 仅在手动刷新或页面初始化时同步日志级别（自动刷新时无需）
+  if (syncLevel) {
+    try {
+      const lvl = await api('GET', '/logs/level');
+      const sel = document.getElementById('log-level-select');
+      if (sel) {
+        // 匹配最接近的选项
+        const opt = [...sel.options].find(o => o.value === lvl.level);
+        if (opt) sel.value = lvl.level;
+        document.getElementById('log-level-badge').textContent = '(当前: ' + lvl.level.split(',')[0] + ')';
+      }
+    } catch(_) {}
+  }
   try {
     const data = await api('GET', '/logs');
     let entries = data.entries || [];
@@ -1032,11 +1045,12 @@ async function loadLogs() {
       const color = STATUS_COLOR[e.status] || 'var(--text)';
       const label = STATUS_LABEL[e.status] || e.status;
       const updTime = e.updated_at ? fmtDateFull(e.updated_at) : '—';
+      const safeHref = (e.url || '').startsWith('https://') ? escHtml(e.url) : '#';
       const shortUrl = (e.url || '').replace(/https?:\/\/(115cdn\.com|115\.com)\/s\//, '').slice(0, 40);
       return `<div class="log-entry">
         <span class="log-time">${updTime}</span>
         <span style="color:${color};font-size:.78rem;font-weight:600">${label}</span>
-        <span class="log-url"><i class="bi bi-link-45deg me-1"></i><a href="${escHtml(e.url||'')}" target="_blank" title="${escHtml(e.url||'')}">#${e.task_id} ${escHtml(shortUrl)}</a></span>
+        <span class="log-url"><i class="bi bi-link-45deg me-1"></i><a href="${safeHref}" target="_blank" rel="noopener noreferrer" title="${escHtml(e.url||'')}">#${e.task_id} ${escHtml(shortUrl)}</a></span>
         ${e.step ? `<span class="log-step"><i class="bi bi-arrow-right-short"></i>${escHtml(e.step)}</span>` : ''}
         ${e.error ? `<span class="log-err"><i class="bi bi-exclamation-triangle me-1"></i>${escHtml(e.error)}</span>` : ''}
       </div>`;
