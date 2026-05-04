@@ -172,6 +172,14 @@ pub async fn create_task(
     .fetch_one(&state.db)
     .await?;
 
+    // 预检查：尝试构建 115 适配器并验证会话有效性，防止提交后 Worker 立刻失败
+    let adapter = state.build_adapter().await.map_err(|e| AppError::Internal(e))?;
+    match adapter.check_session().await {
+        Ok(true) => {}
+        Ok(false) => return Err(AppError::BadRequest("115 会话无效或 Cookie 配置错误，请在系统设置中检查并重新保存 Cookie".to_string())),
+        Err(e) => return Err(AppError::Internal(e)),
+    }
+
     tracing::info!("✅ 创建导入任务 #{}: {}", task.id, task.source_share_url);
 
     // 将任务 ID 推入 Redis 队列，由 Worker 消费

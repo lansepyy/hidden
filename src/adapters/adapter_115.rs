@@ -357,8 +357,11 @@ impl Adapter115 {
 
     /// 新建文件夹，返回新文件夹 ID
     pub async fn create_folder(&self, parent_id: &str, name: &str) -> anyhow::Result<String> {
-        let url = format!("{}/open/folder/add", Self::PROAPI);
-        let form = [("file_name", name), ("pid", parent_id)];
+        // Cookie 登录模式不能调用 OpenAPI `/open/folder/add`，否则 115 会返回
+        // “access_token 格式错误”。参考 P115client，Cookie 模式应使用 webapi
+        // `POST /files/add`，参数为 `{ name, pid }`。
+        let url = format!("{}/files/add", Self::WEBAPI);
+        let form = [("name", name), ("pid", parent_id)];
         let borrowed: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, *v)).collect();
 
         let resp = self.post_with_retry(&url, &borrowed).await?;
@@ -368,6 +371,10 @@ impl Adapter115 {
 
         let folder_id = value_to_string(&resp["data"]["file_id"])
             .or_else(|| value_to_string(&resp["data"]["cid"]))
+            .or_else(|| value_to_string(&resp["data"]["id"]))
+            .or_else(|| value_to_string(&resp["file_id"]))
+            .or_else(|| value_to_string(&resp["cid"]))
+            .or_else(|| value_to_string(&resp["id"]))
             .filter(|id| !id.is_empty())
             .ok_or_else(|| anyhow::anyhow!("创建文件夹成功但响应缺少文件夹 ID：{}", resp))?;
         info!("📁 创建文件夹 '{}' → cid={}", name, folder_id);
@@ -376,19 +383,40 @@ impl Adapter115 {
 
     /// 移动文件
     pub async fn move_files(&self, file_ids: &[&str], target_folder_id: &str) -> anyhow::Result<bool> {
-        let url = format!("{}/open/ufile/move", Self::PROAPI);
-        let ids = file_ids.join(",");
-        let form = [("file_ids", ids.as_str()), ("to_cid", target_folder_id)];
-        let borrowed: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, *v)).collect();
+        // Cookie 登录模式使用 webapi `/files/move`：
+        // - 单个文件：fid=<id>
+        // - 多个文件：fid[0]=<id>&fid[1]=<id>...
+        // - 目标目录：pid=<target cid>
+        let url = format!("{}/files/move", Self::WEBAPI);
+        let mut owned: Vec<(String, String)> = if file_ids.len() == 1 {
+            vec![("fid".to_string(), file_ids[0].to_string())]
+        } else {
+            file_ids
+                .iter()
+                .enumerate()
+                .map(|(i, id)| (format!("fid[{}]", i), (*id).to_string()))
+                .collect()
+        };
+        owned.push(("pid".to_string(), target_folder_id.to_string()));
+        let borrowed: Vec<(&str, &str)> = owned.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
 
         let resp = self.post_with_retry(&url, &borrowed).await?;
-        Ok(state_bool(&resp))
+        if state_bool(&resp) {
+            info!("📦 移动 {} 个条目 → cid={}", file_ids.len(), target_folder_id);
+            Ok(true)
+        } else {
+            warn!("移动失败：{}", resp["message"].as_str().or_else(|| resp["msg"].as_str()).unwrap_or("unknown"));
+            Ok(false)
+        }
     }
 
     /// 重命名文件/目录
     pub async fn rename_file(&self, file_id: &str, new_name: &str) -> anyhow::Result<bool> {
-        let url = format!("{}/open/ufile/update", Self::PROAPI);
-        let form = [("file_id", file_id), ("file_name", new_name)];
+        // Cookie 登录模式使用 webapi `/files/batch_rename`，参数名为
+        // `files_new_name[{file_id}]`。
+        let url = format!("{}/files/batch_rename", Self::WEBAPI);
+        let key = format!("files_new_name[{}]", file_id);
+        let form = [(key.as_str(), new_name)];
         let borrowed: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, *v)).collect();
 
         let resp = self.post_with_retry(&url, &borrowed).await?;
