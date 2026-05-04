@@ -300,9 +300,13 @@ impl Adapter115 {
                         .or_else(|| value_to_string(&f["file_id"]))
                 };
 
+                let file_size = {
+                    let s = parse_size(&f["s"]);
+                    if s > 0 { s } else { parse_size(&f["file_size"]) }
+                };
                 all_files.push(FileEntry {
                     name: f["n"].as_str().or_else(|| f["file_name"].as_str()).unwrap_or("").to_string(),
-                    size: f["s"].as_i64().or_else(|| f["file_size"].as_i64()).unwrap_or(0),
+                    size: file_size,
                     path: f["n"].as_str().or_else(|| f["file_name"].as_str()).unwrap_or("").to_string(),
                     is_dir,
                     file_id,
@@ -444,13 +448,17 @@ impl Adapter115 {
                         .or_else(|| value_to_string(&f["file_id"]))
                 };
 
+                let list_size = {
+                    let s = parse_size(&f["s"]);
+                    if s > 0 { s } else { parse_size(&f["file_size"]) }
+                };
                 FileEntry {
                     name: f["n"]
                         .as_str()
                         .or_else(|| f["file_name"].as_str())
                         .unwrap_or("")
                         .to_string(),
-                    size: f["s"].as_i64().or_else(|| f["file_size"].as_i64()).unwrap_or(0),
+                    size: list_size,
                     path: f["n"]
                         .as_str()
                         .or_else(|| f["file_name"].as_str())

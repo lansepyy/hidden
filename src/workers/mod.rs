@@ -190,13 +190,77 @@ fn extract_share_id(url: &str) -> Result<String> {
         .ok_or_else(|| anyhow::anyhow!("无效的 115 分享 URL：{}", url))
 }
 
-/// 清理 115 中设定的临时文件夹
+/// 清理 115 中设定的临时文件夹下由完成任务可能残留的空展目录
 async fn run_temp_cleanup(state: AppState) -> Result<()> {
-    // 目前仅记录日志，具体清理逻辑留待扩展
     let runtime_config = state.runtime_config().await;
-    info!(
-        "🗑️  临时清理开始（临时目录 ID: {}）",
-        runtime_config.account_115_temp_folder_id
-    );
+    let temp_folder_id = &runtime_config.account_115_temp_folder_id;
+
+    if temp_folder_id.is_empty() || temp_folder_id == "0" {
+        info!("🗑️  临时目录未配置，跳过清理");
+        return Ok(());
+    }
+
+    info!("🗑️  临时清理开始（临时目录 ID: {}）", temp_folder_id);
+
+    let adapter = match state.build_adapter().await {
+        Ok(a) => a,
+        Err(e) => {
+            tracing::warn!("清理任务初始化适配器失败，跳过：{:?}", e);
+            return Ok(());
+        }
+    };
+
+    // 列出临时目录下的所有子目录
+    let entries = match adapter.list_files(temp_folder_id).await {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::warn!("列举临时目录失败：{:?}", e);
+            return Ok(());
+        }
+    };
+
+    // 只处理 hidden-task-* 命名的子目录
+    let task_dirs: Vec<_> = entries
+        .iter()
+        .filter(|f| f.is_dir && f.name.starts_with("hidden-task-"))
+        .collect();
+
+    if task_dirs.is_empty() {
+        info!("🗑️  无需清理的临时任务目录");
+        return Ok(());
+    }
+
+    // 查询已完成任务的 task_id 集合
+    let completed_ids: std::collections::HashSet<String> = sqlx::query_scalar::<_, i64>(
+        "SELECT id FROM import_tasks WHERE status IN ('completed', 'failed', 'skipped')",
+    )
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .map(|id| format!("hidden-task-{}", id))
+    .collect();
+
+    let mut deleted = 0usize;
+    for dir in task_dirs {
+        if completed_ids.contains(&dir.name) {
+            if let Some(ref dir_id) = dir.file_id {
+                // 先列举子目录内容，确认小于 5 个文件时才删除（防止误删）
+                let children = adapter.list_files(dir_id).await.unwrap_or_default();
+                if children.len() < 5 {
+                    if let Err(e) = adapter.delete_files(&[dir_id.as_str()]).await {
+                        tracing::warn!("删除临时目录 {} 失败：{:?}", dir.name, e);
+                    } else {
+                        info!("🗑️  已清理临时目录：{}", dir.name);
+                        deleted += 1;
+                    }
+                } else {
+                    tracing::warn!("临时目录 {} 仍有 {} 个文件，跳过删除", dir.name, children.len());
+                }
+            }
+        }
+    }
+
+    info!("🗑️  清理完成，删除 {} 个空临时目录", deleted);
     Ok(())
 }

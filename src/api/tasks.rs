@@ -271,7 +271,7 @@ pub async fn retry_task(
     .await?
     .ok_or_else(|| AppError::NotFound(format!("任务 #{} 不存在", id)))?;
 
-    if task.status != "failed" && task.status != "transfer_failed" {
+    if !matches!(task.status.as_str(), "failed" | "transfer_failed" | "skipped") {
         return Err(AppError::BadRequest(format!(
             "任务状态为 {}，无法重试",
             task.status
