@@ -158,7 +158,7 @@ impl<'a> Organizer<'a> {
             .unwrap_or_default();
         // 去掉文件名中不能出现的字符。若本地解析出中文标题且 TMDB 返回英文标题，
         // 优先使用本地中文标题，避免成品目录被重命名成英文名。
-        let safe_title = sanitize_name(&preferred_title(tmdb, inferred.map(|p| p.title.as_str())));
+        let safe_title = sanitize_name(&preferred_title(Some(tmdb), inferred.map(|p| p.title.as_str())));
 
         // 剧集文件夹名带 tmdb_id，电影文件夹名不带。
         // 资源目录名始终使用 TMDB 中文标题 + 年份；电影/剧集通过上层“电影/电视剧”目录区分。
