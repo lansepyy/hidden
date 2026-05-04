@@ -146,8 +146,8 @@ impl<'a> Organizer<'a> {
         };
 
         let category = match tmdb {
-            TmdbResult::Movie(_) => "Movies",
-            TmdbResult::Tv(_) => "TV",
+            TmdbResult::Movie(_) => "电影",
+            TmdbResult::Tv(_) => "电视剧",
         };
 
         let year_suffix = tmdb
@@ -157,13 +157,14 @@ impl<'a> Organizer<'a> {
         // 去掉文件名中不能出现的字符
         let safe_title = sanitize_name(tmdb.title());
 
-        // 剑集文件夹名带 tmdb_id，电影文件夹名不带
+        // 剧集文件夹名带 tmdb_id，电影文件夹名不带。
+        // 资源目录名始终使用 TMDB 中文标题 + 年份；电影/剧集通过上层“电影/电视剧”目录区分。
         let resource_folder_name = match tmdb {
             TmdbResult::Tv(_) => format!("{}{} {{tmdb_id={}}}", safe_title, year_suffix, tmdb.tmdb_id()),
             TmdbResult::Movie(_) => format!("{}{}", safe_title, year_suffix),
         };
 
-        // 先建分类目录（Movies / TV），再建资源目录
+        // 先建分类目录（电影 / 电视剧），再建资源目录
         // 失败时直接用 root，不阻塞整体流程
         let category_folder = self
             .adapter

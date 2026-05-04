@@ -153,6 +153,30 @@ pub async fn create_task(
         })
         .unwrap_or(raw_url);
 
+    // 数据库中已存在同一个源分享链接时直接跳过：返回已有任务，不重复入队/转存/创建分享。
+    if let Some(existing_task) = sqlx::query_as::<_, ImportTask>(
+        r#"
+        SELECT id, source_share_url, source_pick_code, status,
+               total_size, total_files, current_step, error_message,
+               priority, category, remark, created_at, updated_at
+        FROM import_tasks
+        WHERE source_share_url = $1
+        ORDER BY created_at DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(&clean_url)
+    .fetch_optional(&state.db)
+    .await?
+    {
+        tracing::info!(
+            "⏭️  分享链接已存在，跳过重复提交：任务 #{} {}",
+            existing_task.id,
+            existing_task.source_share_url
+        );
+        return Ok(Json(existing_task.into()));
+    }
+
     let task = sqlx::query_as::<_, ImportTask>(
         r#"
         INSERT INTO import_tasks

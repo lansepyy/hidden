@@ -10,6 +10,8 @@ use crate::{
     AppState,
 };
 
+const TMDB_IMAGE_BASE: &str = "https://image.tmdb.org/t/p/w500";
+
 // ─────────────────────────────────────────────
 // 查询参数
 // ─────────────────────────────────────────────
@@ -61,11 +63,26 @@ impl From<Resource> for ResourceResponse {
             tmdb_id: r.tmdb_id,
             imdb_id: r.imdb_id,
             overview: r.overview,
-            poster_url: r.poster_url,
-            backdrop_url: r.backdrop_url,
+            poster_url: normalize_tmdb_image_url(r.poster_url),
+            backdrop_url: normalize_tmdb_image_url(r.backdrop_url),
             status: r.status,
             created_at: r.created_at,
         }
+    }
+}
+
+fn normalize_tmdb_image_url(url: Option<String>) -> Option<String> {
+    let url = url?.trim().to_string();
+    if url.is_empty() {
+        return None;
+    }
+
+    if url.starts_with("http://") || url.starts_with("https://") {
+        Some(url)
+    } else if url.starts_with('/') {
+        Some(format!("{}{}", TMDB_IMAGE_BASE, url))
+    } else {
+        Some(url)
     }
 }
 

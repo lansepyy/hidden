@@ -264,10 +264,26 @@ async fn process_task(state: AppState, task_id: i64) -> Result<()> {
         .find(|p| !p.title.is_empty());
 
     // TMDB 匹配
+    // 有季/集信息时强制按电视剧搜索，避免同名电影热度更高导致剧集被整理到电影目录。
+    // 无季/集信息时继续使用电影/电视剧智能匹配。
     let tmdb_result = if let Some(ref parsed) = inferred {
         match TmdbClient::new(&runtime_config) {
             Ok(client) => {
-                let r = client.smart_search(&parsed.title, parsed.year).await;
+                let r = if parsed.season.is_some() || parsed.episode.is_some() {
+                    match client.search_tv(&parsed.title, parsed.year).await {
+                        Ok(mut shows) => shows
+                            .drain(..)
+                            .next()
+                            .map(crate::services::tmdb::TmdbResult::Tv),
+                        Err(e) => {
+                            warn!("TMDB 剧集搜索失败（跳过匹配）：{:?}", e);
+                            None
+                        }
+                    }
+                } else {
+                    client.smart_search(&parsed.title, parsed.year).await
+                };
+
                 if let Some(ref t) = r {
                     info!("🎬 TMDB 匹配成功：{} ({:?})", t.title(), t.year());
                 }
