@@ -215,12 +215,22 @@ impl Adapter115 {
         let url = format!("{}/android/user/space_info", Self::PROAPI);
         let resp = self.get_with_retry(&url, &[]).await?;
 
-        let data = if resp["state"].as_bool().unwrap_or(false) { resp["data"].clone() } else { resp.clone() };
+        // 115 部分接口返回整数 1 作为 state，需同时兼容 bool 和 int
+        let state_ok = resp["state"].as_bool()
+            .unwrap_or_else(|| resp["state"].as_i64().map_or(false, |v| v != 0));
+        let data = if state_ok { resp["data"].clone() } else { resp.clone() };
 
-        let total = data["rt_space_info"]["all_total"]["size"].as_i64().or_else(|| data["all_total"]["size"].as_i64()).unwrap_or(0);
-        let used = data["rt_space_info"]["all_use"]["size"].as_i64().or_else(|| data["all_use"]["size"].as_i64()).unwrap_or(0);
+        let total = data["rt_space_info"]["all_total"]["size"].as_i64()
+            .or_else(|| data["all_total"]["size"].as_i64())
+            .unwrap_or(0);
+        let used = data["rt_space_info"]["all_use"]["size"].as_i64()
+            .or_else(|| data["all_use"]["size"].as_i64())
+            .unwrap_or(0);
+        let free = data["rt_space_info"]["all_remain"]["size"].as_i64()
+            .or_else(|| data["all_remain"]["size"].as_i64())
+            .unwrap_or_else(|| total.saturating_sub(used));
 
-        Ok(QuotaInfo { total, used, free: total - used })
+        Ok(QuotaInfo { total, used, free })
     }
 
     // ─────────────────────────────────────────────
@@ -476,5 +486,26 @@ impl Adapter115 {
                 Ok(false)
             }
         }
+    }
+
+    /// 取消 115 云端分享链接
+    /// POST https://webapi.115.com/share/updateshare  { share_code, action: "cancel" }
+    pub async fn cancel_share(&self, share_code: &str) -> anyhow::Result<()> {
+        let url = format!("{}/share/updateshare", Self::WEBAPI);
+        let form = [
+            ("share_code", share_code),
+            ("action", "cancel"),
+        ];
+        let owned: Vec<(String, String)> = form.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let borrowed: Vec<(&str, &str)> = owned.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+
+        let resp = self.post_with_retry(&url, &borrowed).await?;
+        let ok = resp["state"].as_bool()
+            .unwrap_or_else(|| resp["state"].as_i64().map_or(false, |v| v != 0));
+        if !ok {
+            bail!("取消分享失败：{}", resp["msg"].as_str().unwrap_or("unknown"));
+        }
+        info!("🗑️ 已取消 115 分享 {}", share_code);
+        Ok(())
     }
 }

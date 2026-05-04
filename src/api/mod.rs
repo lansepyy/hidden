@@ -43,7 +43,7 @@ pub fn router() -> Router<AppState> {
         .route("/folders", get(resources::list_folders))
         // 分享管理
         .route("/shares", get(shares::list_shares))
-        .route("/shares/{id}", get(shares::get_share))
+        .route("/shares/{id}", get(shares::get_share).delete(shares::delete_share))
         .route(
             "/shares/{id}/check",
             axum::routing::post(shares::check_share),

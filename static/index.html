@@ -773,6 +773,7 @@ async function renderShares() {
         <td style="white-space:nowrap">
           <button class="btn-sm-ghost" onclick="checkShare(${s.id})" title="验证链接">检查</button>
           ${s.status !== 'active' ? `<button class="btn-sm-ghost" onclick="rebuildShare(${s.id})" title="重建链接" style="margin-left:4px">重建</button>` : ''}
+          <button class="btn-sm-danger" onclick="deleteShare(${s.id})" title="删除分享" style="margin-left:4px">删除</button>
         </td>
       </tr>`).join('')
       : '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:24px">暂无分享记录</td></tr>';
@@ -794,6 +795,14 @@ async function rebuildShare(id) {
     toast('正在重建分享 #' + id + '…', 'info');
     const r = await api('POST', '/shares/' + id + '/rebuild');
     toast(`分享 #${id} 重建成功`, 'success');
+    if (currentPage === 'shares') renderShares();
+  } catch(e) { toast(e.message, 'error'); }
+}
+async function deleteShare(id) {
+  if (!confirm(`确认删除分享 #${id}？\n将同时取消 115 云端分享链接并删除本地记录。`)) return;
+  try {
+    await api('DELETE', '/shares/' + id);
+    toast(`分享 #${id} 已删除`, 'success');
     if (currentPage === 'shares') renderShares();
   } catch(e) { toast(e.message, 'error'); }
 }

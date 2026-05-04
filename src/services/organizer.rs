@@ -156,7 +156,12 @@ impl<'a> Organizer<'a> {
             .unwrap_or_default();
         // 去掉文件名中不能出现的字符
         let safe_title = sanitize_name(tmdb.title());
-        let resource_folder_name = format!("{}{}", safe_title, year_suffix);
+
+        // 剑集文件夹名带 tmdb_id，电影文件夹名不带
+        let resource_folder_name = match tmdb {
+            TmdbResult::Tv(_) => format!("{}{} {{tmdb_id={}}}", safe_title, year_suffix, tmdb.tmdb_id()),
+            TmdbResult::Movie(_) => format!("{}{}", safe_title, year_suffix),
+        };
 
         // 先建分类目录（Movies / TV），再建资源目录
         // 失败时直接用 root，不阻塞整体流程
@@ -195,7 +200,7 @@ pub struct OrganizerResult {
 
 /// 根据 TMDB 元数据生成标准化文件名
 ///
-/// - 电影：`Title (Year) - Quality.ext`
+/// - 电影：`Title (Year) - Quality - {tmdb_id=xxxxx}.ext`
 /// - 剧集：`Title (Year) - S01E01 - Quality.ext`
 pub fn build_standard_name(original: &str, tmdb: Option<&TmdbResult>) -> Option<String> {
     let parsed = parse_file_name(original);
@@ -230,9 +235,15 @@ pub fn build_standard_name(original: &str, tmdb: Option<&TmdbResult>) -> Option<
         .map(|q| format!(" - {}", q))
         .unwrap_or_default();
 
+    // 电影文件名末尾带 tmdb_id，剧集不带
+    let tmdb_suffix = match tmdb {
+        Some(TmdbResult::Movie(m)) => format!(" - {{tmdb_id={}}}", m.id),
+        _ => String::new(),
+    };
+
     Some(format!(
-        "{}{}{}{}.{}",
-        title, year_str, se_str, quality_str, parsed.ext
+        "{}{}{}{}{}.{}",
+        title, year_str, se_str, quality_str, tmdb_suffix, parsed.ext
     ))
 }
 

@@ -274,6 +274,51 @@ pub async fn rebuild_share(
 }
 
 // ─────────────────────────────────────────────
+// DELETE /api/shares/:id  →  删除分享记录（同时取消 115 云端分享）
+// ─────────────────────────────────────────────
+
+pub async fn delete_share(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Json<serde_json::Value>> {
+    let share = sqlx::query_as::<_, Share>(
+        r#"
+        SELECT id, resource_id, share_url, pick_code, share_code,
+               share_title, share_type, file_count, total_size,
+               status, last_checked_at, created_at
+        FROM shares WHERE id = $1
+        "#,
+    )
+    .bind(id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound(format!("分享 #{} 不存在", id)))?;
+
+    // 尝试取消 115 云端分享链接（失败不阻断本地删除）
+    let code_opt = share.share_code.clone()
+        .or_else(|| extract_share_id_from_url(&share.share_url).ok());
+    if let Some(code) = code_opt {
+        match state.build_adapter().await {
+            Ok(adapter) => {
+                if let Err(e) = adapter.cancel_share(&code).await {
+                    tracing::warn!("取消 115 分享失败（继续删除本地记录）：{:?}", e);
+                }
+            }
+            Err(e) => tracing::warn!("构建 Adapter 失败，跳过云端取消：{:?}", e),
+        }
+    }
+
+    sqlx::query("DELETE FROM shares WHERE id = $1")
+        .bind(id)
+        .execute(&state.db)
+        .await?;
+
+    tracing::info!("🗑️ 删除分享记录 #{}", id);
+
+    Ok(Json(serde_json::json!({ "deleted": true, "share_id": id })))
+}
+
+// ─────────────────────────────────────────────
 // 工具函数
 // ─────────────────────────────────────────────
 
