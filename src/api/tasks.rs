@@ -323,3 +323,40 @@ pub async fn cancel_task(
         "timestamp": Utc::now().to_rfc3339(),
     })))
 }
+
+/// DELETE /api/tasks/:id
+/// 删除任务记录（仅允许删除已完成/失败/跳过状态的任务）
+pub async fn delete_task(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Json<serde_json::Value>> {
+    let task = sqlx::query_as::<_, ImportTask>(
+        r#"
+        SELECT id, source_share_url, source_pick_code, status,
+               total_size, total_files, current_step, error_message,
+               priority, category, remark, created_at, updated_at
+        FROM import_tasks WHERE id = $1
+        "#,
+    )
+    .bind(id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound(format!("任务 #{} 不存在", id)))?;
+
+    // 运行中的任务不允许删除
+    if matches!(task.status.as_str(), "pending" | "parsing" | "waiting_space" | "transferring" | "organizing" | "sharing") {
+        return Err(AppError::BadRequest(format!(
+            "任务正在运行中（{}），请先取消再删除",
+            task.status
+        )));
+    }
+
+    sqlx::query("DELETE FROM import_tasks WHERE id = $1")
+        .bind(id)
+        .execute(&state.db)
+        .await?;
+
+    tracing::info!("🗑️ 删除任务 #{}", id);
+
+    Ok(Json(serde_json::json!({ "deleted": true, "task_id": id })))
+}

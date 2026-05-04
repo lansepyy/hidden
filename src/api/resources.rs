@@ -253,3 +253,32 @@ pub async fn list_folders(
 
     Ok(Json(folders))
 }
+
+// ─────────────────────────────────────────────
+// GET /api/folder-name?cid=xxx  →  查询单个目录名称（设置页显示用）
+// ─────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct FolderNameQuery {
+    pub cid: String,
+}
+
+pub async fn get_folder_name(
+    State(state): State<AppState>,
+    Query(params): Query<FolderNameQuery>,
+) -> Result<Json<serde_json::Value>> {
+    if params.cid.is_empty() || params.cid == "0" {
+        return Ok(Json(serde_json::json!({ "cid": params.cid, "name": "根目录" })));
+    }
+    let adapter = state
+        .build_adapter()
+        .await
+        .map_err(|e| AppError::Config(e.to_string()))?;
+
+    let name = adapter
+        .get_folder_name(&params.cid)
+        .await
+        .map_err(|e| AppError::Api115(e.to_string()))?;
+
+    Ok(Json(serde_json::json!({ "cid": params.cid, "name": name })))
+}

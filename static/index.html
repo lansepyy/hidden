@@ -201,6 +201,17 @@ tr:hover td { background: rgba(28,33,40,.6); }
     <div class="col-6 col-md-3"><div class="stat-card"><div class="num" id="s-shares-active" style="color:var(--green)">—</div><div class="label"><i class="bi bi-share me-1"></i>活跃分享</div></div></div>
     <div class="col-6 col-md-3"><div class="stat-card"><div class="num" id="s-shares-total">—</div><div class="label"><i class="bi bi-collection me-1"></i>全部分享</div></div></div>
     <div class="col-6 col-md-3"><div class="stat-card"><div class="num" id="s-tasks-pending" style="color:var(--yellow)">—</div><div class="label"><i class="bi bi-hourglass-split me-1"></i>待处理任务</div></div></div>
+    <div class="col-12"><div class="stat-card" style="padding:14px 20px">
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+        <span style="font-size:.8rem;color:var(--muted)"><i class="bi bi-hdd me-1"></i>115 存储空间</span>
+        <span id="s-quota-free" style="font-weight:700;font-size:1rem">—</span>
+        <span style="font-size:.75rem;color:var(--muted)">副余 / 总计 <span id="s-quota-total">—</span></span>
+        <div id="s-quota-bar" style="flex:1;min-width:120px;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden">
+          <div id="s-quota-bar-fill" style="height:100%;background:var(--blue);width:0%;border-radius:3px;transition:width .5s"></div>
+        </div>
+        <span id="s-quota-pct" style="font-size:.75rem;color:var(--muted)"></span>
+      </div>
+    </div></div>
   </div>
   <!-- Build info bar -->
   <div id="build-info-bar" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 16px;margin-bottom:16px;font-size:.78rem;color:var(--muted);display:flex;gap:20px;flex-wrap:wrap">
@@ -341,6 +352,7 @@ tr:hover td { background: rgba(28,33,40,.6); }
             <input id="s-account_115_root_folder_id" class="form-control" placeholder="115 成品文件夹 ID">
             <button class="btn-browse" onclick="openFolderBrowser('s-account_115_root_folder_id','成品目录')"><i class="bi bi-folder2-open"></i> 浏览</button>
           </div>
+          <div id="s-account_115_root_folder_id-name" style="font-size:.75rem;color:var(--muted);margin-top:4px;min-height:1.2em"></div>
         </div>
         <div>
           <label class="form-label">临时目录 CID <span style="color:var(--muted);font-size:.72rem">（转存暂存目录）</span></label>
@@ -348,6 +360,7 @@ tr:hover td { background: rgba(28,33,40,.6); }
             <input id="s-account_115_temp_folder_id" class="form-control" placeholder="115 临时文件夹 ID">
             <button class="btn-browse" onclick="openFolderBrowser('s-account_115_temp_folder_id','临时目录')"><i class="bi bi-folder2-open"></i> 浏览</button>
           </div>
+          <div id="s-account_115_temp_folder_id-name" style="font-size:.75rem;color:var(--muted);margin-top:4px;min-height:1.2em"></div>
         </div>
       </div>
       <div class="settings-row">
@@ -598,6 +611,17 @@ async function loadDashboard() {
     document.getElementById('s-shares-active').textContent = stats.shares?.active ?? '—';
     document.getElementById('s-shares-total').textContent = stats.shares?.total ?? '—';
     document.getElementById('s-tasks-pending').textContent = stats.tasks?.pending ?? '—';
+    // 配额显示
+    if (stats.quota) {
+      const q = stats.quota;
+      document.getElementById('s-quota-free').textContent = fmtSize(q.free);
+      document.getElementById('s-quota-total').textContent = fmtSize(q.total);
+      const pct = q.total > 0 ? Math.round(q.used / q.total * 100) : 0;
+      document.getElementById('s-quota-pct').textContent = pct + '% 已用';
+      const fill = document.getElementById('s-quota-bar-fill');
+      fill.style.width = pct + '%';
+      fill.style.background = pct > 90 ? 'var(--red)' : pct > 70 ? 'var(--yellow)' : 'var(--blue)';
+    }
     // Recent tasks
     const tasks = await api('GET', '/tasks?limit=8&skip=0');
     const items = tasks.items || tasks;
@@ -833,6 +857,7 @@ async function renderTasks() {
         <td style="white-space:nowrap">
           ${t.status==='failed'||t.status==='skipped' ? `<button class="btn-sm-ghost" onclick="retryTask(${t.id})">重试</button>` : ''}
           ${t.status==='pending' ? `<button class="btn-sm-danger" onclick="cancelTask(${t.id})" style="margin-left:4px">取消</button>` : ''}
+          ${'completed,failed,skipped'.includes(t.status) ? `<button class="btn-sm-danger" onclick="deleteTask(${t.id})" style="margin-left:4px">删除</button>` : ''}
         </td>
       </tr>
       ${t.error_message ? `<tr style="background:rgba(248,81,73,.04)"><td colspan="6" style="padding:4px 12px 10px 48px;color:var(--red);font-size:.78rem;border-bottom:1px solid rgba(48,54,61,.5)"><i class="bi bi-exclamation-circle me-1"></i>${escHtml(t.error_message)}</td></tr>` : ''}`).join('')
@@ -867,6 +892,14 @@ async function cancelTask(id) {
     await renderTasks();
   } catch(e) { toast(e.message, 'error'); }
 }
+async function deleteTask(id) {
+  if (!confirm(`确认删除任务 #${id}？\n将从数据库永久删除此条记录。`)) return;
+  try {
+    await api('DELETE', '/tasks/' + id);
+    toast(`任务 #${id} 已删除`, 'success');
+    await renderTasks();
+  } catch(e) { toast(e.message, 'error'); }
+}
 function startTasksAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = setInterval(() => {
@@ -884,6 +917,17 @@ async function loadSettings() {
     rows.forEach(row => {
       const el = document.getElementById('s-' + row.key);
       if (el) el.value = row.value;
+    });
+    // 加载目录名称
+    const folderKeys = ['account_115_root_folder_id', 'account_115_temp_folder_id'];
+    folderKeys.forEach(async key => {
+      const el = document.getElementById('s-' + key);
+      const nameEl = document.getElementById('s-' + key + '-name');
+      if (!el || !nameEl || !el.value) return;
+      try {
+        const r = await api('GET', '/folder-name?cid=' + encodeURIComponent(el.value));
+        nameEl.innerHTML = '<i class="bi bi-folder-fill me-1" style="color:var(--yellow)"></i>' + escHtml(r.name);
+      } catch(_) {}
     });
   } catch(e) { toast('加载设置失败：' + e.message, 'error'); }
 }
@@ -1033,6 +1077,8 @@ function fbSelectCurrent() {
   const top = _fbStack[_fbStack.length - 1];
   if (top.cid === '0') { toast('请选择具体文件夹，不能使用根目录', 'error'); return; }
   document.getElementById(_fbTargetId).value = top.cid;
+  const nameEl = document.getElementById(_fbTargetId + '-name');
+  if (nameEl) nameEl.innerHTML = '<i class="bi bi-folder-fill me-1" style="color:var(--yellow)"></i>' + escHtml(top.name);
   toast('已选择：' + top.name + ' (ID: ' + top.cid + ')', 'success');
   closeFolderBrowser();
 }
@@ -1068,6 +1114,8 @@ function fbBack(index) {
 }
 function fbPick(cid, name) {
   document.getElementById(_fbTargetId).value = cid;
+  const nameEl = document.getElementById(_fbTargetId + '-name');
+  if (nameEl) nameEl.innerHTML = '<i class="bi bi-folder-fill me-1" style="color:var(--yellow)"></i>' + escHtml(name);
   toast('已选择：' + name + ' (ID: ' + cid + ')', 'success');
   closeFolderBrowser();
 }

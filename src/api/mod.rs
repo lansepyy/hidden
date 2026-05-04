@@ -28,7 +28,7 @@ pub fn router() -> Router<AppState> {
             "/tasks/import-share",
             axum::routing::post(tasks::create_task),
         )
-        .route("/tasks/{id}", get(tasks::get_task))
+        .route("/tasks/{id}", get(tasks::get_task).delete(tasks::delete_task))
         .route("/tasks/{id}/retry", axum::routing::post(tasks::retry_task))
         .route(
             "/tasks/{id}/cancel",
@@ -41,6 +41,7 @@ pub fn router() -> Router<AppState> {
         .route("/resources/{id}/files", get(resources::get_resource_files))
         // 115 文件夹浏览（设置页用）
         .route("/folders", get(resources::list_folders))
+        .route("/folder-name", get(resources::get_folder_name))
         // 分享管理
         .route("/shares", get(shares::list_shares))
         .route("/shares/{id}", get(shares::get_share).delete(shares::delete_share))

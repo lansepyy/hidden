@@ -230,6 +230,12 @@ impl Adapter115 {
             .or_else(|| data["all_remain"]["size"].as_i64())
             .unwrap_or_else(|| total.saturating_sub(used));
 
+        info!("📊 存储配额 - 总计:{} 已用:{} 剩余:{} (state_ok={})",
+            total, used, free, state_ok);
+        if free == 0 && total == 0 {
+            warn!("配额 API 返回值全为 0，原始响应: {}", resp);
+        }
+
         Ok(QuotaInfo { total, used, free })
     }
 
@@ -446,6 +452,37 @@ impl Adapter115 {
 
         info!("📂 列举目录 {} 完成：{} 个条目", cid, entries.len());
         Ok(entries)
+    }
+
+    /// 通过 CID 获取文件夹名称
+    /// 利用 /files?cid=xxx 响应中的 `path` 数组（面包屑），取最后一项即为当前目录名
+    pub async fn get_folder_name(&self, cid: &str) -> anyhow::Result<String> {
+        if cid == "0" || cid.is_empty() {
+            return Ok("根目录".to_string());
+        }
+        let url = format!("{}/files", Self::WEBAPI);
+        let params = [
+            ("cid", cid),
+            ("show_dir", "1"),
+            ("limit", "1"),
+            ("offset", "0"),
+            ("aid", "1"),
+        ];
+        let resp = self.get_with_retry(&url, &params).await?;
+        // path 是面包屑数组，最后一项是当前目录
+        if let Some(path_arr) = resp["path"].as_array() {
+            if let Some(last) = path_arr.last() {
+                let name = last["name"].as_str()
+                    .or_else(|| last["n"].as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if !name.is_empty() {
+                    return Ok(name);
+                }
+            }
+        }
+        // 兜底：返回 CID 本身
+        Ok(cid.to_string())
     }
 
     /// 为指定文件/目录创建分享链接
