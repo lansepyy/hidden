@@ -110,7 +110,11 @@ impl Adapter115 {
             );
         }
 
-        let client = Client::builder().default_headers(headers).build().context("创建 HTTP 客户端失败")?;
+        let client = Client::builder()
+            .default_headers(headers)
+            .timeout(Duration::from_secs(30))
+            .build()
+            .context("创建 HTTP 客户端失败")?;
 
         let initial = Instant::now() - Duration::from_millis(config.account_115_request_interval_ms);
 
@@ -243,15 +247,12 @@ impl Adapter115 {
             let free = parse_size(&data["all_remain"]["size"]);
             let used = parse_size(&data["all_use"]["size"]);
             info!("📊 space_info - 已用:{} 剩余:{} raw_data={}", used, free, data);
-            if used > 0 && free > 0 {
-                let total = used + free;
+            if used > 0 {
+                // used > 0 说明 API 返回有效数据；free=0 是合法的满存状态，直接信任
+                let total = used.saturating_add(free);
                 return Ok(QuotaInfo { total, used, free });
             }
-            if used > 0 && free == 0 {
-                warn!("space_info 返回 free=0（可能解析异常），将尝试 index_info 端点作为验证");
-            } else {
-                warn!("space_info 返回空数据，将尝试 index_info 端点");
-            }
+            warn!("space_info 返回 used=0，将尝试 index_info 端点");
         }
 
         // ── 方法 2：webapi /files/index_info ─────────────────────────────────

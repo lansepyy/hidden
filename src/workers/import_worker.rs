@@ -18,6 +18,28 @@ const IDLE_SLEEP_SECS: u64 = 3;
 pub async fn run_worker_loop(state: AppState) -> Result<()> {
     info!("⚙️  Worker 循环启动，等待任务...");
 
+    // 启动时将所有进行中状态（可能是上次崩溃遗留）重置为失败
+    let stuck_statuses = ["parsing", "waiting_space", "transferring", "organizing", "sharing"];
+    for s in &stuck_statuses {
+        let n = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM import_tasks WHERE status = $1"
+        )
+        .bind(s)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(0);
+        if n > 0 {
+            let _ = sqlx::query(
+                "UPDATE import_tasks SET status = 'failed', error_message = $1, current_step = NULL WHERE status = $2"
+            )
+            .bind(format!("Worker 重启时发现任务滞留于「{}」状态，已自动标记失败，请手动重新提交", s))
+            .bind(s)
+            .execute(&state.db)
+            .await;
+            warn!("⚠️  Worker 启动：重置 {} 个滞留于「{}」的任务为 failed", n, s);
+        }
+    }
+
     loop {
         // BRPOP 阻塞等待（5 秒超时）
         let task_id = match pop_task(&state.redis).await {
@@ -470,14 +492,18 @@ fn build_share_file_ids(
         return ids;
     }
 
+    // 只收集唯一的目标文件夹 ID，文件已在其中无需再单独列出
     for result in organize_results {
         if !result.folder_id.is_empty() && result.folder_id != "0" {
             push_unique_id(&mut ids, &result.folder_id);
         }
     }
 
-    for result in organize_results {
-        push_unique_id(&mut ids, &result.file_id);
+    // 若所有文件都没有目标文件夹（root_folder_id 未配置），退化为只分享文件 ID
+    if ids.is_empty() {
+        for result in organize_results {
+            push_unique_id(&mut ids, &result.file_id);
+        }
     }
 
     ids
