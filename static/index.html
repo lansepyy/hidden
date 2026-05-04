@@ -211,8 +211,8 @@ tr:hover td { background: rgba(28,33,40,.6); }
     <div class="col-12"><div class="stat-card" style="padding:14px 20px">
       <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
         <span style="font-size:.8rem;color:var(--muted)"><i class="bi bi-hdd me-1"></i>115 存储空间</span>
-        <span id="s-quota-free" style="font-weight:700;font-size:1rem">—</span>
-        <span style="font-size:.75rem;color:var(--muted)">剩余 / 总计 <span id="s-quota-total">—</span></span>
+        <span style="font-size:.75rem;color:var(--muted)">已用 <span id="s-quota-used" style="font-weight:700;font-size:.9rem;color:var(--text)">—</span> / 共 <span id="s-quota-total">—</span></span>
+        <span style="font-size:.75rem;color:var(--muted)">剩余 <span id="s-quota-free" style="font-weight:700;font-size:.9rem;color:var(--green)">—</span></span>
         <div id="s-quota-bar" style="flex:1;min-width:120px;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden">
           <div id="s-quota-bar-fill" style="height:100%;background:var(--blue);width:0%;border-radius:3px;transition:width .5s"></div>
         </div>
@@ -725,22 +725,28 @@ async function loadDashboard() {
     // 配额显示
     if (stats.quota) {
       const q = stats.quota;
-      document.getElementById('s-quota-free').textContent = fmtSize(q.free);
+      const usedEl = document.getElementById('s-quota-used');
+      const freeEl = document.getElementById('s-quota-free');
+      if (usedEl) usedEl.textContent = fmtSize(q.used);
+      if (freeEl) freeEl.textContent = q.free > 0 ? fmtSize(q.free) : '—';
       document.getElementById('s-quota-total').textContent = fmtSize(q.total);
       const pct = q.total > 0 ? Math.round(q.used / q.total * 100) : 0;
       document.getElementById('s-quota-pct').textContent = pct + '% 已用';
       const fill = document.getElementById('s-quota-bar-fill');
       fill.style.width = pct + '%';
       fill.style.background = pct > 90 ? 'var(--red)' : pct > 70 ? 'var(--yellow)' : 'var(--blue)';
+      if (freeEl) freeEl.style.color = q.free > 0 ? 'var(--green)' : 'var(--red)';
     } else if (stats.quota_error) {
       // 显示更友好的错误提示（例如 Cookie 未配置、网络/权限问题）
-      document.getElementById('s-quota-free').textContent = '—';
+      const freeEl = document.getElementById('s-quota-free');
+      const usedEl = document.getElementById('s-quota-used');
+      if (usedEl) usedEl.textContent = '—';
+      if (freeEl) freeEl.textContent = '—';
       document.getElementById('s-quota-total').textContent = '—';
       document.getElementById('s-quota-pct').textContent = '配额获取失败';
       const fill = document.getElementById('s-quota-bar-fill');
       fill.style.width = '0%';
       fill.style.background = 'var(--muted)';
-      const freeEl = document.getElementById('s-quota-free');
       if (freeEl) freeEl.title = stats.quota_error;
     }
     // Recent tasks

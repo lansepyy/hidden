@@ -357,6 +357,16 @@ impl TmdbClient {
             return None;
         }
 
+        let result = self.smart_search_with_year(title, year).await;
+        // 如果带年份搜索无结果，去掉年份再搜一次（避免因年份偏差导致匹配失败）
+        if result.is_none() && year.is_some() {
+            warn!("TMDB 带年份搜索无结果，尝试去掉年份重搜：'{}'", title);
+            return self.smart_search_with_year(title, None).await;
+        }
+        result
+    }
+
+    async fn smart_search_with_year(&self, title: &str, year: Option<i32>) -> Option<TmdbResult> {
         let (movies, shows) = tokio::join!(
             self.search_movie(title, year),
             self.search_tv(title, year),

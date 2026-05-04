@@ -229,28 +229,55 @@ impl Adapter115 {
     }
 
     /// 获取账号存储配额
+    /// 优先用 proapi user/space_info；若 free=0 且 used>0（可能是离线空间统计），
+    /// 再尝试 webapi files/index_info 里更详细的字段。
     pub async fn get_quota(&self) -> anyhow::Result<QuotaInfo> {
-        let url = format!("{}/android/user/space_info", Self::PROAPI);
-        let resp = self.get_with_retry(&url, &[]).await?;
+        // ── 方法 1：proapi /android/user/space_info ──────────────────────────
+        let url1 = format!("{}/android/user/space_info", Self::PROAPI);
+        let resp1 = self.get_with_retry(&url1, &[]).await?;
 
-        // 115 API state 可能是整数 1 或布尔 true
-        if !state_bool(&resp) {
-            warn!("配额 API 返回失败，原始响应: {}", resp);
+        if !state_bool(&resp1) {
+            warn!("配额 API (space_info) 返回失败，原始响应: {}", resp1);
+        } else {
+            let data = &resp1["data"];
+            let free = parse_size(&data["all_remain"]["size"]);
+            let used = parse_size(&data["all_use"]["size"]);
+            info!("📊 space_info - 已用:{} 剩余:{} raw_data={}", used, free, data);
+            if used > 0 || free > 0 {
+                let total = used + free;
+                return Ok(QuotaInfo { total, used, free });
+            }
+            warn!("space_info 返回空数据，将尝试 index_info 端点");
+        }
+
+        // ── 方法 2：webapi /files/index_info ─────────────────────────────────
+        let url2 = format!("{}/files/index_info", Self::WEBAPI);
+        let resp2 = self.get_with_retry(&url2, &[("count_space_nums", "0")]).await?;
+
+        if !state_bool(&resp2) {
+            warn!("配额 API (index_info) 返回失败，原始响应: {}", resp2);
             return Ok(QuotaInfo { total: 0, used: 0, free: 0 });
         }
-        let data = &resp["data"];
+        let data2 = &resp2["data"];
+        info!("📊 index_info raw_data={}", data2);
 
-        // p115wsgidav 确认字段路径：data["all_remain"]["size"]、data["all_use"]["size"]
-        // 注意：all_total 字段 p115client 全库都未使用，可能不存在，用 used+free 计算
-        let free  = parse_size(&data["all_remain"]["size"]);
-        let used  = parse_size(&data["all_use"]["size"]);
-        let total = used + free;
+        // 尝试两种常见路径：直接在 data 下，或在 data.space_info.rt_space_info 下
+        let (free, used) = {
+            let f = parse_size(&data2["all_remain"]["size"]);
+            let u = parse_size(&data2["all_use"]["size"]);
+            if f > 0 || u > 0 {
+                (f, u)
+            } else {
+                let rt = &data2["space_info"]["rt_space_info"];
+                (parse_size(&rt["all_remain"]["size"]), parse_size(&rt["all_use"]["size"]))
+            }
+        };
 
-        info!("📊 存储配额 - 总计:{} 已用:{} 剩余:{}", total, used, free);
-        if total == 0 && used == 0 && free == 0 {
-            warn!("配额值全为 0，原始 data: {}", data);
+        if used == 0 && free == 0 {
+            warn!("两种端点均未获取到有效配额，原始 data={}", data2);
         }
-
+        let total = used + free;
+        info!("📊 存储配额（index_info）- 总计:{} 已用:{} 剩余:{}", total, used, free);
         Ok(QuotaInfo { total, used, free })
     }
 

@@ -54,6 +54,12 @@ static RE_QUALITY: Lazy<Regex> = Lazy::new(|| {
     .expect("quality regex failed")
 });
 
+/// 剥离文件名开头的发布组标签，如 [SubGroup] 或 (LoliHouse) 等
+static RE_PREFIX_GROUP: Lazy<Regex> = Lazy::new(|| {
+    // 负向预查：跳过括号内容是 4 位年份（19xx/20xx）的情况，避免把 (2025) 剥掉
+    Regex::new(r#"^(?:\s*[\[\(](?!(?:19|20)\d{2}[\]\)])[^\]\)]{1,40}[\]\)]\s*)+"#).expect("prefix group regex failed")
+});
+
 /// 技术标签截断：遇到这些词就认为标题已结束（片源/编码/分辨率/音频等）
 static RE_TECH_CUT: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
@@ -116,7 +122,15 @@ pub fn parse_file_name(file_name: &str) -> ParsedFileName {
     };
 
     // 标准化分隔符：点、下划线→空格
-    let normalized = stem.replace(['.', '_'], " ");
+    let normalized_raw = stem.replace(['.', '_'], " ");
+    // 剥离发布组前缀（如 [SubGroup]、[LoliHouse]），避免影响 TMDB 搜索
+    let normalized = if let Some(m) = RE_PREFIX_GROUP.find(&normalized_raw) {
+        // 仅当剥离后还有内容时才剥离
+        let rest = normalized_raw[m.end()..].trim();
+        if !rest.is_empty() { rest.to_string() } else { normalized_raw.clone() }
+    } else {
+        normalized_raw.clone()
+    };
 
     // 解析画质（从原始文件名中提取，避免分隔符替换后找不到）
     if let Some(caps) = RE_QUALITY.captures(&normalized) {
