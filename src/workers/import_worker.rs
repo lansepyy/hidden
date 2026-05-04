@@ -4,9 +4,9 @@ use anyhow::Result;
 use tracing::{error, info, warn};
 
 use crate::{
-    adapters::Adapter115,
+    adapters::{Adapter115, FileEntry},
     services::{check_share_rate, record_share_created, Organizer, TmdbClient},
-    utils::parse_file_name,
+    utils::{is_subtitle_file, is_video_file, parse_file_name},
     AppState,
 };
 
@@ -236,16 +236,30 @@ async fn process_task(state: AppState, task_id: i64) -> Result<()> {
     // ── Step 4: 整理（去广告 + TMDB 匹配 + 重命名 + 移动）────
     update_task_step(&state.db, task_id, "organizing", "整理文件结构").await;
 
-    // 列出转存后任务专属临时目录中的真实文件（获取云盘实际 ID）
+    // 列出转存后任务专属临时目录中的真实条目（用于兜底分享文件夹）
     let temp_files = adapter
         .list_files(&task_temp_folder)
         .await
         .map_err(|e| anyhow::anyhow!("列举任务临时目录失败：{}", e))?;
 
+    // 递归展开转存后的目录。115 分享经常是“外层文件夹 + 内部媒体文件”，
+    // 只列临时目录第一层会导致后续整理/入库看不到真正的视频文件。
+    let mut media_files = Vec::new();
+    for entry in &temp_files {
+        collect_files_recursive(&adapter, entry, "", &mut media_files).await?;
+    }
+
+    if media_files.is_empty() {
+        warn!(
+            "任务 #{} 转存完成但递归未发现文件，后续将仅保留顶层条目用于分享兜底",
+            task_id
+        );
+    }
+
     // 从文件名推断标题和年份（取第一个视频文件）
-    let inferred = temp_files
+    let inferred = media_files
         .iter()
-        .filter(|f| !f.is_dir && crate::utils::is_video_file(&f.name))
+        .filter(|f| !f.is_dir && is_video_file(&f.name))
         .map(|f| parse_file_name(&f.name))
         .find(|p| !p.title.is_empty());
 
@@ -270,62 +284,23 @@ async fn process_task(state: AppState, task_id: i64) -> Result<()> {
 
     // 执行整理（删广告 + 重命名 + 移动）
     let organize_results = Organizer::new(&adapter, &runtime_config)
-        .organize(&temp_files, tmdb_result.as_ref())
+        .organize(&media_files, tmdb_result.as_ref())
         .await
         .unwrap_or_else(|e| {
             warn!("整理步骤出错（非致命，继续执行）：{:?}", e);
             vec![]
         });
 
-    // 将资源元数据写入 resources 表（若 TMDB 匹配到）
-    let resource_id: Option<i64> = if let Some(ref tmdb) = tmdb_result {
-        match sqlx::query_scalar::<_, i64>(
-            r#"
-            INSERT INTO resources
-                (title, original_title, year, resource_type,
-                 tmdb_id, overview, poster_url, backdrop_url, status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active')
-            RETURNING id
-            "#,
-        )
-        .bind(tmdb.title())
-        .bind(tmdb.original_title())
-        .bind(tmdb.year())
-        .bind(tmdb.media_type())
-        .bind(tmdb.tmdb_id())
-        .bind(tmdb.overview())
-        .bind(tmdb.poster_url())
-        .bind(tmdb.backdrop_url())
-        .fetch_one(&state.db)
-        .await
-        {
-            Ok(rid) => {
-                info!("📝 资源 #{} 已写入数据库：{}", rid, tmdb.title());
-                // 关联整理后的文件
-                for r in &organize_results {
-                    let _ = sqlx::query(
-                        r#"
-                        INSERT INTO resource_files
-                            (resource_id, file_name, cloud_file_id)
-                        VALUES ($1, $2, $3)
-                        "#,
-                    )
-                    .bind(rid)
-                    .bind(&r.final_name)
-                    .bind(&r.file_id)
-                    .execute(&state.db)
-                    .await;
-                }
-                Some(rid)
-            }
-            Err(e) => {
-                warn!("资源入库失败（非致命）：{:?}", e);
-                None
-            }
-        }
-    } else {
-        None
-    };
+    // 无论 TMDB 是否匹配成功，都写入 resources / resource_files。
+    // 否则只要 TMDB 未配置、匹配失败，任务就会“转存完成但资源库无展示”。
+    let resource_id = upsert_resource_and_files(
+        &state.db,
+        tmdb_result.as_ref(),
+        inferred.as_ref(),
+        &media_files,
+        &organize_results,
+    )
+    .await;
 
     // ── Step 5: 创建新分享 ───────────────────────
     update_task_step(&state.db, task_id, "sharing", "创建分享链接").await;
@@ -363,7 +338,13 @@ async fn process_task(state: AppState, task_id: i64) -> Result<()> {
                 let year_str = t.year().map(|y| format!(" ({})", y)).unwrap_or_default();
                 format!("{}{}", t.title(), year_str)
             })
-            .unwrap_or_else(|| "Hidden 导入资源".to_string());
+            .or_else(|| {
+                inferred.as_ref().map(|p| {
+                    let year_str = p.year.map(|y| format!(" ({})", y)).unwrap_or_default();
+                    format!("{}{}", p.title, year_str)
+                })
+            })
+            .unwrap_or_else(|| format!("Hidden 导入任务 #{}", task_id));
 
         match adapter.create_share(&id_refs, Some(&share_title), 7).await {
             Ok(share_result) => {
@@ -406,6 +387,190 @@ async fn process_task(state: AppState, task_id: i64) -> Result<()> {
 
     info!("🎉 任务 #{} 已完成", task_id);
     Ok(())
+}
+
+/// 展开 115 目录，把所有文件加入 `out`。
+///
+/// `Adapter115::list_files` 只返回单层；转存分享目录时，真正的视频经常在下一层或更深层。
+/// 这里使用显式栈迭代，避免递归 async fn 产生无限大小 Future。
+async fn collect_files_recursive(
+    adapter: &Adapter115,
+    entry: &FileEntry,
+    parent_path: &str,
+    out: &mut Vec<FileEntry>,
+) -> Result<()> {
+    let mut stack: Vec<(FileEntry, String)> = vec![(entry.clone(), parent_path.to_string())];
+
+    while let Some((current, parent)) = stack.pop() {
+        let current_path = if parent.is_empty() {
+            current.name.clone()
+        } else {
+            format!("{}/{}", parent, current.name)
+        };
+
+        if !current.is_dir {
+            let mut file = current;
+            file.path = current_path;
+            out.push(file);
+            continue;
+        }
+
+        let Some(folder_id) = current.file_id.as_deref() else {
+            warn!("目录 {} 缺少 cid，无法展开", current_path);
+            continue;
+        };
+
+        let children = adapter
+            .list_files(folder_id)
+            .await
+            .map_err(|e| anyhow::anyhow!("列举目录 {} 失败：{}", current_path, e))?;
+
+        // 反向入栈以尽量保持与 115 返回一致的遍历顺序。
+        for child in children.into_iter().rev() {
+            stack.push((child, current_path.clone()));
+        }
+    }
+
+    Ok(())
+}
+
+/// 写入资源与文件索引，保证前端资源库能展示导入结果。
+async fn upsert_resource_and_files(
+    db: &sqlx::PgPool,
+    tmdb: Option<&crate::services::tmdb::TmdbResult>,
+    inferred: Option<&crate::utils::ParsedFileName>,
+    media_files: &[FileEntry],
+    organize_results: &[crate::services::organizer::OrganizerResult],
+) -> Option<i64> {
+    let fallback_title = inferred
+        .map(|p| p.title.trim())
+        .filter(|title| !title.is_empty())
+        .unwrap_or("未识别资源");
+
+    let title = tmdb.map(|t| t.title()).unwrap_or(fallback_title);
+    let original_title = tmdb.map(|t| t.original_title());
+    let year = tmdb.and_then(|t| t.year()).or_else(|| inferred.and_then(|p| p.year));
+    let resource_type = tmdb
+        .map(|t| t.media_type())
+        .or_else(|| {
+            media_files
+                .iter()
+                .any(|f| parse_file_name(&f.name).episode.is_some())
+                .then_some("tv")
+        })
+        .unwrap_or("other");
+    let tmdb_id = tmdb.map(|t| t.tmdb_id());
+    let overview = tmdb.and_then(|t| t.overview());
+    let poster_url = tmdb.and_then(|t| t.poster_url());
+    let backdrop_url = tmdb.and_then(|t| t.backdrop_url());
+
+    let resource_id = match sqlx::query_scalar::<_, i64>(
+        r#"
+        INSERT INTO resources
+            (title, original_title, year, resource_type,
+             tmdb_id, overview, poster_url, backdrop_url, status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active')
+        RETURNING id
+        "#,
+    )
+    .bind(title)
+    .bind(original_title)
+    .bind(year)
+    .bind(resource_type)
+    .bind(tmdb_id)
+    .bind(overview)
+    .bind(poster_url)
+    .bind(backdrop_url)
+    .fetch_one(db)
+    .await
+    {
+        Ok(rid) => rid,
+        Err(e) => {
+            warn!("资源入库失败（非致命）：{:?}", e);
+            return None;
+        }
+    };
+
+    info!("📝 资源 #{} 已写入数据库：{}", resource_id, title);
+
+    if organize_results.is_empty() {
+        for file in media_files.iter().filter(|f| !f.is_dir) {
+            insert_resource_file(db, resource_id, file, None).await;
+        }
+    } else {
+        for result in organize_results {
+            let fallback_file;
+            let file = match media_files
+                .iter()
+                .find(|f| f.file_id.as_deref() == Some(result.file_id.as_str()))
+            {
+                Some(source) => source,
+                None => {
+                    fallback_file = FileEntry {
+                        name: result.final_name.clone(),
+                        size: 0,
+                        path: result.final_name.clone(),
+                        is_dir: false,
+                        file_id: Some(result.file_id.clone()),
+                        pick_code: None,
+                    };
+                    &fallback_file
+                }
+            };
+
+            insert_resource_file(db, resource_id, file, Some(result)).await;
+        }
+    }
+
+    Some(resource_id)
+}
+
+/// 写入单个资源文件，包含解析出的季集、画质、扩展名等字段。
+async fn insert_resource_file(
+    db: &sqlx::PgPool,
+    resource_id: i64,
+    file: &FileEntry,
+    organized: Option<&crate::services::organizer::OrganizerResult>,
+) {
+    let final_name = organized
+        .map(|r| r.final_name.as_str())
+        .unwrap_or(file.name.as_str());
+    let parsed = parse_file_name(final_name);
+    let media_type = if is_video_file(final_name) {
+        Some("video")
+    } else if is_subtitle_file(final_name) {
+        Some("subtitle")
+    } else {
+        Some("other")
+    };
+    let cloud_file_id = organized
+        .map(|r| r.file_id.as_str())
+        .or(file.file_id.as_deref());
+    let file_path = organized
+        .map(|r| format!("{}/{}", r.folder_id, final_name))
+        .unwrap_or_else(|| file.path.clone());
+
+    let _ = sqlx::query(
+        r#"
+        INSERT INTO resource_files
+            (resource_id, file_name, file_path, file_size, file_ext,
+             media_type, season, episode, quality, cloud_file_id, pick_code)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        "#,
+    )
+    .bind(resource_id)
+    .bind(final_name)
+    .bind(file_path)
+    .bind(file.size)
+    .bind(parsed.ext)
+    .bind(media_type)
+    .bind(parsed.season)
+    .bind(parsed.episode)
+    .bind(parsed.quality)
+    .bind(cloud_file_id)
+    .bind(file.pick_code.as_deref())
+    .execute(db)
+    .await;
 }
 
 /// 从分享 URL 提取 share_id
