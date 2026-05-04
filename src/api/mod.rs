@@ -37,12 +37,17 @@ pub fn router() -> Router<AppState> {
         // 资源搜索
         .route("/resources", get(resources::list_resources))
         .route("/resources/popular", get(resources::popular_resources))
+        .route("/resources/search-tmdb", get(resources::search_tmdb))
         .route(
             "/resources/:id",
             get(resources::get_resource).delete(resources::delete_resource),
         )
         .route("/resources/:id/shares", get(resources::get_resource_shares))
         .route("/resources/:id/files", get(resources::get_resource_files))
+        .route(
+            "/resources/:id/reorganize",
+            axum::routing::post(resources::reorganize_resource),
+        )
         // 115 文件夹浏览（设置页用）
         .route("/folders", get(resources::list_folders))
         .route("/folder-name", get(resources::get_folder_name))

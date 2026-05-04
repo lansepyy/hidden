@@ -246,10 +246,26 @@ tr:hover td { background: rgba(28,33,40,.6); }
 
   <div id="res-home-panel">
     <div class="card mb-4" style="padding:16px">
-      <div class="res-section-title"><span><i class="bi bi-fire me-1"></i>TMDB 热门电影</span><span>点击海报搜索本地库</span></div>
-      <div id="res-popular-movies" class="resource-grid"></div>
-      <div class="res-section-title" style="margin-top:22px"><span><i class="bi bi-broadcast me-1"></i>TMDB 热门电视剧</span><span>点击海报搜索本地库</span></div>
-      <div id="res-popular-tv" class="resource-grid"></div>
+      <!-- TMDB 分类标签 -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:12px">
+        <button class="btn-sm-ghost active" id="tmdb-tab-movie"         onclick="switchTmdbTab('movie','res-popular-movies')">🔥 热门电影</button>
+        <button class="btn-sm-ghost"        id="tmdb-tab-now_playing"   onclick="switchTmdbTab('now_playing','res-popular-movies')">🎬 正在热映</button>
+        <button class="btn-sm-ghost"        id="tmdb-tab-upcoming"      onclick="switchTmdbTab('upcoming','res-popular-movies')">📅 即将上映</button>
+        <button class="btn-sm-ghost"        id="tmdb-tab-top_rated_movie" onclick="switchTmdbTab('top_rated_movie','res-popular-movies')">⭐ 高分电影</button>
+        <span style="width:1px;background:var(--border);margin:0 4px"></span>
+        <button class="btn-sm-ghost"        id="tmdb-tab-tv"            onclick="switchTmdbTab('tv','res-popular-tv')">📺 热门剧集</button>
+        <button class="btn-sm-ghost"        id="tmdb-tab-airing_today"  onclick="switchTmdbTab('airing_today','res-popular-tv')">📡 今日播出</button>
+        <button class="btn-sm-ghost"        id="tmdb-tab-top_rated_tv"  onclick="switchTmdbTab('top_rated_tv','res-popular-tv')">⭐ 高分剧集</button>
+        <span style="margin-left:auto;font-size:.75rem;color:var(--muted);align-self:center">点击海报搜索本地库</span>
+      </div>
+      <!-- 电影区 -->
+      <div id="tmdb-movie-area">
+        <div id="res-popular-movies" class="resource-grid"></div>
+      </div>
+      <!-- 剧集区（默认隐藏） -->
+      <div id="tmdb-tv-area" style="display:none">
+        <div id="res-popular-tv" class="resource-grid"></div>
+      </div>
     </div>
   </div>
 
@@ -521,6 +537,65 @@ tr:hover td { background: rgba(28,33,40,.6); }
   </div>
 </div>
 
+<!-- ── Reorganize Modal ── -->
+<div id="reorganize-modal" class="modal-overlay" onclick="if(event.target===this)closeReorganizeModal()">
+  <div class="modal-box" style="max-width:560px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
+      <h3 style="margin:0;font-size:1rem"><i class="bi bi-pencil-square me-2" style="color:var(--blue)"></i>手动整理</h3>
+      <button class="modal-close" onclick="closeReorganizeModal()" style="position:static"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">显示标题 <span style="color:var(--red)">*</span></label>
+      <input id="reorg-title" class="form-control" placeholder="中文标题，如：飞驰人生3">
+    </div>
+    <div class="row g-2 mb-3">
+      <div class="col-6">
+        <label class="form-label">资源类型</label>
+        <select id="reorg-type" class="form-select">
+          <option value="movie">🎬 电影</option>
+          <option value="tv">📺 电视剧</option>
+          <option value="anime">🎌 动漫</option>
+          <option value="variety">🎤 综艺</option>
+          <option value="documentary">🎥 纪录片</option>
+          <option value="other">📦 其他</option>
+        </select>
+      </div>
+      <div class="col-6">
+        <label class="form-label">年份</label>
+        <input id="reorg-year" class="form-control" type="number" placeholder="如 2026">
+      </div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">TMDB ID <span style="color:var(--muted);font-size:.75rem">（填入后自动拉取海报/简介）</span></label>
+      <input id="reorg-tmdb-id" class="form-control" type="number" placeholder="可选，如 128">
+    </div>
+    <!-- TMDB 搜索辅助 -->
+    <div class="mb-3" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:12px">
+      <div style="font-size:.8rem;color:var(--muted);margin-bottom:8px"><i class="bi bi-search me-1"></i>搜索 TMDB 辅助填入</div>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <input id="reorg-search-q" class="form-control" style="flex:1" placeholder="搜索关键词…"
+               onkeyup="if(event.key==='Enter')searchTmdbForReorg()">
+        <select id="reorg-search-type" class="form-select" style="width:100px">
+          <option value="movie">电影</option>
+          <option value="tv">剧集</option>
+        </select>
+        <button class="btn-primary" style="white-space:nowrap" onclick="searchTmdbForReorg()">搜索</button>
+      </div>
+      <div id="reorg-search-results" style="max-height:200px;overflow-y:auto"></div>
+    </div>
+    <div class="mb-3">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.85rem">
+        <input type="checkbox" id="reorg-rename-files" style="width:16px;height:16px">
+        同时尝试重命名 115 云盘对应文件
+      </label>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn-sm-ghost" onclick="closeReorganizeModal()">取消</button>
+      <button class="btn-primary" onclick="submitReorganize()"><i class="bi bi-check-lg me-1"></i>保存整理</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Toast Container ── -->
 <div id="toast-container"></div>
 
@@ -719,13 +794,6 @@ function switchResourceView(view) {
     renderResources();
   }
 }
-async function renderResourcesHome() {
-  switchResourcePanelsOnly('home');
-  await Promise.all([
-    renderPopularResources('movie', 'res-popular-movies'),
-    renderPopularResources('tv', 'res-popular-tv')
-  ]);
-}
 function switchResourcePanelsOnly(view) {
   document.getElementById('res-home-panel').style.display = view === 'home' ? '' : 'none';
   document.getElementById('res-local-panel').style.display = view === 'home' ? 'none' : '';
@@ -733,19 +801,6 @@ function switchResourcePanelsOnly(view) {
     const el = document.getElementById('res-tab-' + k);
     if (el) el.classList.toggle('active', k === view);
   });
-}
-async function renderPopularResources(type, targetId) {
-  const grid = document.getElementById(targetId);
-  grid.innerHTML = '<div style="text-align:center;padding:28px;color:var(--muted);grid-column:1/-1"><span class="spinner"></span></div>';
-  try {
-    const items = await api('GET', `/resources/popular?type=${type}&limit=12`);
-    grid.innerHTML = items.length ? items.map(r => resourceCardHtml(r, {
-      onClick: `searchLocalResource('${jsString(r.title)}','${type}')`,
-      isLocal: false
-    })).join('') : `<div style="grid-column:1/-1;color:var(--muted);padding:24px;text-align:center">暂无热门${typeLabel(type)}</div>`;
-  } catch(e) {
-    grid.innerHTML = `<div style="grid-column:1/-1;color:var(--red);padding:16px">${escHtml(e.message)}</div>`;
-  }
 }
 async function searchLocalResource(title, type) {
   switchResourceView(type || 'local');
@@ -856,7 +911,10 @@ async function showResource(id) {
               <h2 style="font-size:1.25rem;margin:0 0 4px;line-height:1.3">${escHtml(r.title)}</h2>
               ${r.original_title ? `<div style="color:var(--muted);font-size:.82rem;margin-bottom:8px">${escHtml(r.original_title)}</div>` : ''}
             </div>
-            <button class="btn-sm-danger" onclick="deleteResource(${r.id})" style="white-space:nowrap"><i class="bi bi-trash me-1"></i>删除资源</button>
+            <div style="display:flex;gap:6px;white-space:nowrap">
+              <button class="btn-sm-ghost" onclick="openReorganizeModal(${r.id},'${jsString(r.title)}','${jsString(r.resource_type)}',${r.year||'null'},${r.tmdb_id||'null'})"><i class="bi bi-pencil-square me-1"></i>手动整理</button>
+              <button class="btn-sm-danger" onclick="deleteResource(${r.id})"><i class="bi bi-trash me-1"></i>删除资源</button>
+            </div>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center">
             ${r.year ? `<span class="badge-completed">${r.year}</span>` : ''}
@@ -897,6 +955,131 @@ async function deleteResource(id) {
 function closeModal() {
   currentResourceId = null;
   document.getElementById('res-modal').classList.remove('open');
+}
+
+// ══════════════════════════════════════════════
+// TMDB 热门分类切换
+// ══════════════════════════════════════════════
+let tmdbCurrentType = 'movie';
+const TMDB_MOVIE_TYPES = ['movie','now_playing','upcoming','top_rated_movie'];
+const TMDB_TV_TYPES    = ['tv','airing_today','top_rated_tv'];
+
+async function switchTmdbTab(type, _unused) {
+  tmdbCurrentType = type;
+  // 更新 tab 高亮
+  ['movie','now_playing','upcoming','top_rated_movie','tv','airing_today','top_rated_tv'].forEach(t => {
+    const el = document.getElementById('tmdb-tab-' + t);
+    if (el) el.classList.toggle('active', t === type);
+  });
+  // 显示/隐藏对应区域
+  const isTV = TMDB_TV_TYPES.includes(type);
+  document.getElementById('tmdb-movie-area').style.display = isTV ? 'none' : '';
+  document.getElementById('tmdb-tv-area').style.display   = isTV ? '' : 'none';
+  // 加载数据
+  const targetId = isTV ? 'res-popular-tv' : 'res-popular-movies';
+  const mediaType = isTV ? 'tv' : 'movie';
+  await renderPopularResources(type, targetId, mediaType);
+}
+
+async function renderResourcesHome() {
+  switchResourcePanelsOnly('home');
+  // 初始只加热门电影
+  await renderPopularResources('movie', 'res-popular-movies', 'movie');
+}
+
+async function renderPopularResources(type, targetId, mediaType) {
+  const grid = document.getElementById(targetId);
+  grid.innerHTML = '<div style="text-align:center;padding:28px;color:var(--muted);grid-column:1/-1"><span class="spinner"></span></div>';
+  try {
+    const items = await api('GET', `/resources/popular?type=${type}&limit=20`);
+    grid.innerHTML = items.length ? items.map(r => resourceCardHtml(r, {
+      onClick: `searchLocalResource('${jsString(r.title)}','${mediaType}')`,
+      isLocal: false
+    })).join('') : `<div style="grid-column:1/-1;color:var(--muted);padding:24px;text-align:center">暂无数据</div>`;
+  } catch(e) {
+    grid.innerHTML = `<div style="grid-column:1/-1;color:var(--red);padding:16px">${escHtml(e.message)}</div>`;
+  }
+}
+
+// ══════════════════════════════════════════════
+// 手动整理
+// ══════════════════════════════════════════════
+let reorganizeResourceId = null;
+
+function openReorganizeModal(id, title, type, year, tmdbId) {
+  reorganizeResourceId = id;
+  document.getElementById('reorg-title').value   = title || '';
+  document.getElementById('reorg-type').value    = type  || 'movie';
+  document.getElementById('reorg-year').value    = year  || '';
+  document.getElementById('reorg-tmdb-id').value = tmdbId || '';
+  document.getElementById('reorg-search-q').value = title || '';
+  document.getElementById('reorg-search-type').value = (['tv','anime'].includes(type)) ? 'tv' : 'movie';
+  document.getElementById('reorg-search-results').innerHTML = '';
+  document.getElementById('reorg-rename-files').checked = false;
+  document.getElementById('reorganize-modal').classList.add('open');
+}
+
+function closeReorganizeModal() {
+  reorganizeResourceId = null;
+  document.getElementById('reorganize-modal').classList.remove('open');
+}
+
+async function searchTmdbForReorg() {
+  const q    = document.getElementById('reorg-search-q').value.trim();
+  const type = document.getElementById('reorg-search-type').value;
+  const box  = document.getElementById('reorg-search-results');
+  if (!q) return;
+  box.innerHTML = '<div style="text-align:center;padding:12px;color:var(--muted)"><span class="spinner"></span></div>';
+  try {
+    const items = await api('GET', `/resources/search-tmdb?q=${encodeURIComponent(q)}&type=${type}`);
+    if (!items.length) { box.innerHTML = '<div style="color:var(--muted);font-size:.82rem;padding:8px">未找到匹配结果</div>'; return; }
+    box.innerHTML = items.map(it => `
+      <div onclick="selectTmdbResult(${it.tmdb_id},'${jsString(it.title)}','${type}',${it.year||'null'})"
+           style="display:flex;gap:10px;padding:8px;border-radius:5px;cursor:pointer;border:1px solid transparent;transition:.15s"
+           onmouseover="this.style.borderColor='var(--blue)';this.style.background='rgba(88,166,255,.08)'"
+           onmouseout="this.style.borderColor='transparent';this.style.background=''">
+        ${it.poster_url ? `<img src="${escHtml(it.poster_url)}" style="width:36px;height:54px;object-fit:cover;border-radius:3px;flex-shrink:0">` : '<div style="width:36px;height:54px;background:var(--surface);border-radius:3px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--muted)"><i class="bi bi-film"></i></div>'}
+        <div style="min-width:0">
+          <div style="font-size:.85rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(it.title)}</div>
+          <div style="font-size:.75rem;color:var(--muted)">${escHtml(it.original_title)}${it.year ? ' · ' + it.year : ''} · ID ${it.tmdb_id}</div>
+          ${it.overview ? `<div style="font-size:.72rem;color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${escHtml(it.overview)}</div>` : ''}
+        </div>
+      </div>`).join('');
+  } catch(e) { box.innerHTML = `<div style="color:var(--red);font-size:.82rem;padding:8px">${escHtml(e.message)}</div>`; }
+}
+
+function selectTmdbResult(tmdbId, title, type, year) {
+  document.getElementById('reorg-tmdb-id').value = tmdbId;
+  document.getElementById('reorg-title').value   = title;
+  document.getElementById('reorg-type').value    = type;
+  if (year) document.getElementById('reorg-year').value = year;
+  document.getElementById('reorg-search-results').innerHTML =
+    `<div style="font-size:.78rem;color:var(--green);padding:4px 8px"><i class="bi bi-check-circle me-1"></i>已选择：${escHtml(title)} (ID ${tmdbId})</div>`;
+}
+
+async function submitReorganize() {
+  if (!reorganizeResourceId) return;
+  const title = document.getElementById('reorg-title').value.trim();
+  if (!title) { toast('标题不能为空', 'error'); return; }
+  const body = {
+    title,
+    resource_type: document.getElementById('reorg-type').value,
+    rename_files:  document.getElementById('reorg-rename-files').checked,
+  };
+  const tmdbIdVal = document.getElementById('reorg-tmdb-id').value.trim();
+  if (tmdbIdVal) body.tmdb_id = parseInt(tmdbIdVal, 10);
+  const yearVal = document.getElementById('reorg-year').value.trim();
+  if (yearVal) body.year = parseInt(yearVal, 10);
+  try {
+    const r = await api('POST', `/resources/${reorganizeResourceId}/reorganize`, body);
+    toast(`资源已更新：${r.title}`, 'success');
+    closeReorganizeModal();
+    // 刷新详情弹窗
+    if (document.getElementById('res-modal').classList.contains('open')) {
+      showResource(reorganizeResourceId);
+    }
+    if (currentPage === 'resources' && resView !== 'home') renderResources();
+  } catch(e) { toast(e.message, 'error'); }
 }
 
 // ══════════════════════════════════════════════

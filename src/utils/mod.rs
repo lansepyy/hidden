@@ -54,6 +54,34 @@ static RE_QUALITY: Lazy<Regex> = Lazy::new(|| {
     .expect("quality regex failed")
 });
 
+/// 技术标签截断：遇到这些词就认为标题已结束（片源/编码/分辨率/音频等）
+static RE_TECH_CUT: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?ix)
+        (?:^|[\s.\-_\[\(])
+        (?:
+            # 分辨率
+            4[Kk]|2160[pP]|1080[pPiI]|720[pPiI]|480[pP]|UHD|FULL[\s._-]?HD
+            # 片源
+            |WEB[\s._-]?DL|WEBRip|BluRay|Blu[\s._-]?Ray|BDRip|BRRip|BDRemux|REMUX|HDTV|PDTV|HDCam|DVDRip|DVDScr|HDRip
+            # 视频编码
+            |[xX]265|[xX]264|H[\s._]?265|H[\s._]?264|HEVC|AVC|AV1|VP9
+            # 音频编码（含声道数）
+            |DTS[\s._-]?(?:HD|MA|X|ES)?|TrueHD|EAC3|AC3|AAC|FLAC|LPCM|PCM|MP3
+            |DDP?[\s._]?\d[\s._]\d|DD\+[\s._]?\d
+            # HDR 类型
+            |HDR10\+?|HLG|Dolby[\s._]?Vision|DV(?=[\s.\-_\[\)]|$)
+            # 流媒体来源
+            |NF|AMZN|DSNP|HMAX|ATVP|PCOK|iT\b|STAN|FUNI|CRKL|PMTP|MA
+            # 质量标签
+            |IMAX|HQ|HQ[\s._-]?HDR|PROPER|REPACK|RETAIL|REMASTERED
+        )
+        (?:[\s.\-_\]\)]|$)
+        "
+    )
+    .expect("tech cut regex failed")
+});
+
 // ─────────────────────────────────────────────
 // 文件名解析
 // ─────────────────────────────────────────────
@@ -76,7 +104,7 @@ pub fn parse_file_name(file_name: &str) -> ParsedFileName {
         .unwrap_or("")
         .to_lowercase();
 
-    // 去掉扩展名后处理
+    // 去掉扩展名
     let stem = std::path::Path::new(file_name)
         .file_stem()
         .and_then(|s| s.to_str())
@@ -87,20 +115,20 @@ pub fn parse_file_name(file_name: &str) -> ParsedFileName {
         ..Default::default()
     };
 
-    // 解析年份
-    if let Some(caps) = RE_YEAR.captures(stem) {
-        if let Some(y) = caps.name("y") {
-            result.year = y.as_str().parse().ok();
-        }
+    // 标准化分隔符：点、下划线→空格
+    let normalized = stem.replace(['.', '_'], " ");
+
+    // 解析画质（从原始文件名中提取，避免分隔符替换后找不到）
+    if let Some(caps) = RE_QUALITY.captures(&normalized) {
+        result.quality = caps.name("q").map(|m| m.as_str().to_string());
     }
 
     // 解析季集号
-    if let Some(caps) = RE_SEASON_EPISODE.captures(stem) {
+    if let Some(caps) = RE_SEASON_EPISODE.captures(&normalized) {
         result.season = caps
             .name("s1")
             .or_else(|| caps.name("s2"))
             .and_then(|m| m.as_str().parse().ok());
-
         result.episode = caps
             .name("e1")
             .or_else(|| caps.name("e2"))
@@ -109,18 +137,30 @@ pub fn parse_file_name(file_name: &str) -> ParsedFileName {
             .and_then(|m| m.as_str().parse().ok());
     }
 
-    // 解析画质
-    if let Some(caps) = RE_QUALITY.captures(stem) {
-        result.quality = caps.name("q").map(|m| m.as_str().to_string());
+    // 解析年份
+    if let Some(caps) = RE_YEAR.captures(&normalized) {
+        if let Some(y) = caps.name("y") {
+            result.year = y.as_str().parse().ok();
+        }
     }
 
-    // 提取标题（去掉年份、季集、画质后的剩余部分）
-    let title_raw = RE_SEASON_EPISODE
-        .replace(stem, "")
-        .to_string();
-    let title_raw = RE_YEAR.replace(&title_raw, "").to_string();
-    let title_raw = RE_QUALITY.replace(&title_raw, "").to_string();
-    result.title = clean_title(&title_raw);
+    // ── 提取标题：取最左侧截断点之前的内容 ──────────────────
+    // 截断点优先级：季集号 < 年份 < 技术标签，取最小 start 位置
+    let mut cutoff = normalized.len();
+
+    if let Some(m) = RE_SEASON_EPISODE.find(&normalized) {
+        cutoff = cutoff.min(m.start());
+    }
+    if let Some(m) = RE_YEAR.find(&normalized) {
+        cutoff = cutoff.min(m.start());
+    }
+    if let Some(m) = RE_TECH_CUT.find(&normalized) {
+        // RE_TECH_CUT 允许前缀空格，实际内容从 +1 开始；直接用 match start 即可
+        cutoff = cutoff.min(m.start());
+    }
+
+    let title_raw = &normalized[..cutoff];
+    result.title = clean_title(title_raw);
 
     result
 }

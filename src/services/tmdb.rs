@@ -239,9 +239,79 @@ impl TmdbClient {
         Ok(movies)
     }
 
+    /// TMDB 正在热映电影
+    pub async fn now_playing_movies(&self, limit: usize) -> Result<Vec<TmdbMovie>> {
+        let resp = self.get("/movie/now_playing", &[]).await?;
+        let mut movies: Vec<TmdbMovie> = resp["results"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|v| serde_json::from_value(v.clone()).ok())
+            .collect();
+        movies.truncate(limit);
+        Ok(movies)
+    }
+
+    /// TMDB 即将上映电影
+    pub async fn upcoming_movies(&self, limit: usize) -> Result<Vec<TmdbMovie>> {
+        let resp = self.get("/movie/upcoming", &[]).await?;
+        let mut movies: Vec<TmdbMovie> = resp["results"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|v| serde_json::from_value(v.clone()).ok())
+            .collect();
+        movies.truncate(limit);
+        Ok(movies)
+    }
+
+    /// TMDB 高分电影 (top_rated)
+    pub async fn top_rated_movies(&self, limit: usize) -> Result<Vec<TmdbMovie>> {
+        let resp = self.get("/movie/top_rated", &[]).await?;
+        let mut movies: Vec<TmdbMovie> = resp["results"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|v| serde_json::from_value(v.clone()).ok())
+            .collect();
+        movies.truncate(limit);
+        Ok(movies)
+    }
+
     /// TMDB 热门电视剧，用于资源库首页推荐入口。
     pub async fn popular_tv(&self, limit: usize) -> Result<Vec<TmdbTv>> {
         let resp = self.get("/tv/popular", &[]).await?;
+        let mut shows: Vec<TmdbTv> = resp["results"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|v| serde_json::from_value(v.clone()).ok())
+            .collect();
+        shows.truncate(limit);
+        Ok(shows)
+    }
+
+    /// TMDB 今日播出剧集
+    pub async fn airing_today_tv(&self, limit: usize) -> Result<Vec<TmdbTv>> {
+        let resp = self.get("/tv/airing_today", &[]).await?;
+        let mut shows: Vec<TmdbTv> = resp["results"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|v| serde_json::from_value(v.clone()).ok())
+            .collect();
+        shows.truncate(limit);
+        Ok(shows)
+    }
+
+    /// TMDB 高分剧集 (top_rated)
+    pub async fn top_rated_tv(&self, limit: usize) -> Result<Vec<TmdbTv>> {
+        let resp = self.get("/tv/top_rated", &[]).await?;
         let mut shows: Vec<TmdbTv> = resp["results"]
             .as_array()
             .cloned()

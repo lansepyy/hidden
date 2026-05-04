@@ -52,9 +52,13 @@ pub struct ShareResult {
 }
 
 /// 解析 115 API 的 state 字段，兼容 bool（true/false）和整数（1/0）两种形式。
+/// 与 p115client 的 check_response 行为一致：state 字段缺失时视为成功（返回 true）。
 fn state_bool(resp: &Value) -> bool {
-    resp["state"].as_bool()
-        .unwrap_or_else(|| resp["state"].as_i64().map_or(false, |n| n != 0))
+    match &resp["state"] {
+        Value::Null => true,   // 字段缺失 → 视为成功（同 Python check_response 默认值 True）
+        v => v.as_bool()
+            .unwrap_or_else(|| v.as_i64().map_or(false, |n| n != 0)),
+    }
 }
 
 /// 解析 115 API 的 size 字段，兼容数字和字符串两种形式（如 "2199023255552" 或 2199023255552）。
@@ -236,10 +240,11 @@ impl Adapter115 {
         }
         let data = &resp["data"];
 
-        // p115wsgidav 确认字段路径：data["all_remain"]["size"]，size 可能是字符串
-        let total = parse_size(&data["all_total"]["size"]);
-        let used  = parse_size(&data["all_use"]["size"]);
+        // p115wsgidav 确认字段路径：data["all_remain"]["size"]、data["all_use"]["size"]
+        // 注意：all_total 字段 p115client 全库都未使用，可能不存在，用 used+free 计算
         let free  = parse_size(&data["all_remain"]["size"]);
+        let used  = parse_size(&data["all_use"]["size"]);
+        let total = used + free;
 
         info!("📊 存储配额 - 总计:{} 已用:{} 剩余:{}", total, used, free);
         if total == 0 && used == 0 && free == 0 {
