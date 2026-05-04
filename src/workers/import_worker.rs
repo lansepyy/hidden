@@ -179,15 +179,19 @@ async fn process_task(state: AppState, task_id: i64) -> Result<()> {
     }
 
     let quota = adapter.get_quota().await?;
-    let min_free_bytes = runtime_config.transfer_min_free_space_gb as i64 * 1024 * 1024 * 1024;
-    if quota.free < share_info.total_size + min_free_bytes {
-        // 剩余空间不足（要求保留配置指定的最小剩余空间）
-        return Err(anyhow::anyhow!(
-            "存储空间不足：剩余 {} bytes，需要转存 {} bytes 并保留 {} bytes 余量",
-            quota.free,
-            share_info.total_size,
-            min_free_bytes
-        ));
+    // 配额 API 失败时返回全 0，跳过空间检查避免误抦任务
+    if quota.total > 0 {
+        let min_free_bytes = runtime_config.transfer_min_free_space_gb as i64 * 1024 * 1024 * 1024;
+        if quota.free < share_info.total_size + min_free_bytes {
+            return Err(anyhow::anyhow!(
+                "存储空间不足：剩余 {} bytes，需要转存 {} bytes 并保留 {} bytes 余量",
+                quota.free,
+                share_info.total_size,
+                min_free_bytes
+            ));
+        }
+    } else {
+        tracing::warn!("配额 API 返回全 0，跳过空间检查继续执行");
     }
 
     // ── Step 3: 转存文件 ─────────────────────────

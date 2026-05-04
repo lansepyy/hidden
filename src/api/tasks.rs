@@ -303,7 +303,7 @@ pub async fn cancel_task(
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>> {
     let result = sqlx::query(
-        "UPDATE import_tasks SET status = 'skipped' WHERE id = $1 AND status = 'pending'",
+        "UPDATE import_tasks SET status = 'skipped' WHERE id = $1 AND status IN ('pending', 'waiting_space')",
     )
     .bind(id)
     .execute(&state.db)
@@ -311,7 +311,7 @@ pub async fn cancel_task(
 
     if result.rows_affected() == 0 {
         return Err(AppError::BadRequest(
-            "任务不存在或状态不允许取消".to_string(),
+            "任务不存在或状态不允许取消（只可取消待处理或空间等待中的任务）".to_string(),
         ));
     }
 
@@ -343,8 +343,8 @@ pub async fn delete_task(
     .await?
     .ok_or_else(|| AppError::NotFound(format!("任务 #{} 不存在", id)))?;
 
-    // 运行中的任务不允许删除
-    if matches!(task.status.as_str(), "pending" | "parsing" | "waiting_space" | "transferring" | "organizing" | "sharing") {
+    // 运行中的任务不允许删除（waiting_space 是卡住的空间等待，允许删除）
+    if matches!(task.status.as_str(), "parsing" | "transferring" | "organizing" | "sharing") {
         return Err(AppError::BadRequest(format!(
             "任务正在运行中（{}），请先取消再删除",
             task.status

@@ -41,7 +41,7 @@ pub async fn get_stats(State(state): State<AppState>) -> Result<Json<Value>> {
         .await?;
 
     let tasks_pending =
-        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM import_tasks WHERE status = 'pending'")
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM import_tasks WHERE status IN ('pending', 'waiting_space')")
             .fetch_one(&state.db)
             .await?;
 

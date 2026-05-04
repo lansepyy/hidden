@@ -51,6 +51,20 @@ pub struct ShareResult {
     pub share_id: String,
 }
 
+/// 解析 115 API 的 state 字段，兼容 bool（true/false）和整数（1/0）两种形式。
+fn state_bool(resp: &Value) -> bool {
+    resp["state"].as_bool()
+        .unwrap_or_else(|| resp["state"].as_i64().map_or(false, |n| n != 0))
+}
+
+/// 解析 115 API 的 size 字段，兼容数字和字符串两种形式（如 "2199023255552" 或 2199023255552）。
+fn parse_size(v: &Value) -> i64 {
+    v.as_i64()
+        .or_else(|| v.as_u64().map(|n| n as i64))
+        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        .unwrap_or(0)
+}
+
 /// 将 115 API 返回的字符串/数字 ID 统一转换为字符串。
 ///
 /// 115 的部分接口会把 `fid`、`cid`、`file_id`、`pick_code` 等字段以数字返回，
@@ -195,7 +209,7 @@ impl Adapter115 {
     pub async fn check_session(&self) -> anyhow::Result<bool> {
         let url = format!("{}/user/space_summury", Self::WEBAPI);
         match self.post_with_retry(&url, &[]).await {
-            Ok(v) if v["state"].as_bool().unwrap_or(false) => {
+            Ok(v) if state_bool(&v) => {
                 info!("✅ 115 会话有效");
                 Ok(true)
             }
@@ -215,25 +229,21 @@ impl Adapter115 {
         let url = format!("{}/android/user/space_info", Self::PROAPI);
         let resp = self.get_with_retry(&url, &[]).await?;
 
-        // 115 部分接口返回整数 1 作为 state，需同时兼容 bool 和 int
-        let state_ok = resp["state"].as_bool()
-            .unwrap_or_else(|| resp["state"].as_i64().map_or(false, |v| v != 0));
-        let data = if state_ok { resp["data"].clone() } else { resp.clone() };
+        // 115 API state 可能是整数 1 或布尔 true
+        if !state_bool(&resp) {
+            warn!("配额 API 返回失败，原始响应: {}", resp);
+            return Ok(QuotaInfo { total: 0, used: 0, free: 0 });
+        }
+        let data = &resp["data"];
 
-        let total = data["rt_space_info"]["all_total"]["size"].as_i64()
-            .or_else(|| data["all_total"]["size"].as_i64())
-            .unwrap_or(0);
-        let used = data["rt_space_info"]["all_use"]["size"].as_i64()
-            .or_else(|| data["all_use"]["size"].as_i64())
-            .unwrap_or(0);
-        let free = data["rt_space_info"]["all_remain"]["size"].as_i64()
-            .or_else(|| data["all_remain"]["size"].as_i64())
-            .unwrap_or_else(|| total.saturating_sub(used));
+        // p115wsgidav 确认字段路径：data["all_remain"]["size"]，size 可能是字符串
+        let total = parse_size(&data["all_total"]["size"]);
+        let used  = parse_size(&data["all_use"]["size"]);
+        let free  = parse_size(&data["all_remain"]["size"]);
 
-        info!("📊 存储配额 - 总计:{} 已用:{} 剩余:{} (state_ok={})",
-            total, used, free, state_ok);
-        if free == 0 && total == 0 {
-            warn!("配额 API 返回值全为 0，原始响应: {}", resp);
+        info!("📊 存储配额 - 总计:{} 已用:{} 剩余:{}", total, used, free);
+        if total == 0 && used == 0 && free == 0 {
+            warn!("配额值全为 0，原始 data: {}", data);
         }
 
         Ok(QuotaInfo { total, used, free })
@@ -264,9 +274,11 @@ impl Adapter115 {
 
             let resp = self.get_with_retry(&url, &params).await?;
 
-            if !resp["state"].as_bool().unwrap_or(false) {
+            if !state_bool(&resp) {
                 let errno = resp["errno"].as_i64().unwrap_or(0);
-                let msg = resp["msg"].as_str().unwrap_or("unknown");
+                let msg = resp["message"].as_str()
+                    .or_else(|| resp["msg"].as_str())
+                    .unwrap_or("unknown");
                 bail!("解析分享失败 [errno={}]：{}", errno, msg);
             }
 
@@ -326,12 +338,14 @@ impl Adapter115 {
 
         let resp = self.post_with_retry(&url, &borrowed).await?;
 
-        if resp["state"].as_bool().unwrap_or(false) {
+        if state_bool(&resp) {
             info!("✅ 转存完成：{} 个文件 → cid={}", file_ids.len(), target_folder_id);
             Ok(true)
         } else {
             let errno = resp["errno"].as_i64().unwrap_or(0);
-            let msg = resp["msg"].as_str().unwrap_or("unknown").to_string();
+            let msg = resp["message"].as_str()
+                .or_else(|| resp["msg"].as_str())
+                .unwrap_or("unknown").to_string();
             error!("转存失败 [errno={}]：{}", errno, msg);
             bail!("转存失败 [errno={}]：{}", errno, msg);
         }
@@ -344,8 +358,8 @@ impl Adapter115 {
         let borrowed: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, *v)).collect();
 
         let resp = self.post_with_retry(&url, &borrowed).await?;
-        if !resp["state"].as_bool().unwrap_or(false) {
-            bail!("创建文件夹失败：{}", resp["msg"].as_str().unwrap_or("unknown"));
+        if !state_bool(&resp) {
+            bail!("创建文件夹失败：{}", resp["message"].as_str().or_else(|| resp["msg"].as_str()).unwrap_or("unknown"));
         }
 
         let folder_id = value_to_string(&resp["data"]["file_id"])
@@ -364,7 +378,7 @@ impl Adapter115 {
         let borrowed: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, *v)).collect();
 
         let resp = self.post_with_retry(&url, &borrowed).await?;
-        Ok(resp["state"].as_bool().unwrap_or(false))
+        Ok(state_bool(&resp))
     }
 
     /// 重命名文件/目录
@@ -374,11 +388,11 @@ impl Adapter115 {
         let borrowed: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, *v)).collect();
 
         let resp = self.post_with_retry(&url, &borrowed).await?;
-        if resp["state"].as_bool().unwrap_or(false) {
+        if state_bool(&resp) {
             info!("✏️  重命名 {} → {}", file_id, new_name);
             Ok(true)
         } else {
-            warn!("重命名失败：{}", resp["msg"].as_str().unwrap_or("unknown"));
+            warn!("重命名失败：{}", resp["message"].as_str().or_else(|| resp["msg"].as_str()).unwrap_or("unknown"));
             Ok(false)
         }
     }
@@ -395,7 +409,7 @@ impl Adapter115 {
         let borrowed: Vec<(&str, &str)> = owned.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
 
         let resp = self.post_with_retry(&url, &borrowed).await?;
-        Ok(resp["state"].as_bool().unwrap_or(false))
+        Ok(state_bool(&resp))
     }
 
     /// 列出指定目录下的所有文件（不深递归，webapi 115 兼容性最佳）
@@ -499,8 +513,8 @@ impl Adapter115 {
         let borrowed: Vec<(&str, &str)> = owned.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
 
         let resp = self.post_with_retry(&url, &borrowed).await?;
-        if !resp["state"].as_bool().unwrap_or(false) {
-            bail!("创建分享失败：{}", resp["msg"].as_str().unwrap_or("unknown"));
+        if !state_bool(&resp) {
+            bail!("创建分享失败：{}", resp["message"].as_str().or_else(|| resp["msg"].as_str()).unwrap_or("unknown"));
         }
 
         let data = &resp["data"];
@@ -537,10 +551,8 @@ impl Adapter115 {
         let borrowed: Vec<(&str, &str)> = owned.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
 
         let resp = self.post_with_retry(&url, &borrowed).await?;
-        let ok = resp["state"].as_bool()
-            .unwrap_or_else(|| resp["state"].as_i64().map_or(false, |v| v != 0));
-        if !ok {
-            bail!("取消分享失败：{}", resp["msg"].as_str().unwrap_or("unknown"));
+        if !state_bool(&resp) {
+            bail!("取消分享失败：{}", resp["message"].as_str().or_else(|| resp["msg"].as_str()).unwrap_or("unknown"));
         }
         info!("🗑️ 已取消 115 分享 {}", share_code);
         Ok(())

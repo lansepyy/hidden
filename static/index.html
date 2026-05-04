@@ -205,7 +205,7 @@ tr:hover td { background: rgba(28,33,40,.6); }
       <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
         <span style="font-size:.8rem;color:var(--muted)"><i class="bi bi-hdd me-1"></i>115 存储空间</span>
         <span id="s-quota-free" style="font-weight:700;font-size:1rem">—</span>
-        <span style="font-size:.75rem;color:var(--muted)">副余 / 总计 <span id="s-quota-total">—</span></span>
+        <span style="font-size:.75rem;color:var(--muted)">剩余 / 总计 <span id="s-quota-total">—</span></span>
         <div id="s-quota-bar" style="flex:1;min-width:120px;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden">
           <div id="s-quota-bar-fill" style="height:100%;background:var(--blue);width:0%;border-radius:3px;transition:width .5s"></div>
         </div>
@@ -575,7 +575,7 @@ function fmtSize(bytes) {
   return v.toFixed(1) + ' ' + units[i];
 }
 function statusBadge(s) {
-  const map = { active:'badge-active', inactive:'badge-inactive', failed:'badge-failed', pending:'badge-pending', completed:'badge-completed', organizing:'badge-pending', transferring:'badge-pending', parsing:'badge-pending' };
+  const map = { active:'badge-active', inactive:'badge-inactive', failed:'badge-failed', pending:'badge-pending', waiting_space:'badge-pending', completed:'badge-completed', skipped:'badge-inactive', organizing:'badge-pending', transferring:'badge-pending', parsing:'badge-pending', sharing:'badge-pending' };
   const cls = map[s] || 'badge-inactive';
   return `<span class="${cls}">${escHtml(s)}</span>`;
 }
@@ -708,11 +708,15 @@ async function showResource(id) {
     ]);
     const sharesHtml = (shares||[]).map(s => `
       <tr>
-        <td><a href="${escHtml(s.share_url)}" target="_blank">${escHtml(s.share_url)}</a></td>
+        <td><a href="${escHtml(s.share_url)}" target="_blank" rel="noopener" style="font-size:.8rem;word-break:break-all">${escHtml(s.share_url)}</a></td>
         <td>${statusBadge(s.status)}</td>
         <td>${s.file_count||'—'}</td>
         <td>${fmtDate(s.created_at)}</td>
-        <td><button class="btn-sm-ghost" onclick="checkShare(${s.id})">检查</button></td>
+        <td style="white-space:nowrap">
+          <button class="btn-sm-ghost" onclick="checkShare(${s.id})">检查</button>
+          ${s.status !== 'active' ? `<button class="btn-sm-ghost" onclick="rebuildShare(${s.id})" style="margin-left:4px">重建</button>` : ''}
+          <button class="btn-sm-danger" onclick="deleteShare(${s.id})" style="margin-left:4px">删除</button>
+        </td>
       </tr>`).join('');
     const filesHtml = (Array.isArray(files)?files:files.items||[]).map(f => `
       <tr>
@@ -741,12 +745,12 @@ async function showResource(id) {
           ${r.overview ? `<p style="font-size:.83rem;color:var(--muted);line-height:1.6;margin:0;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden">${escHtml(r.overview)}</p>` : ''}
         </div>
       </div>
-      ${sharesHtml ? `
+      ${shares && shares.length ? `
       <div style="margin-bottom:14px">
         <div style="font-size:.8rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">分享链接</div>
         <table><thead><tr><th>URL</th><th>状态</th><th>文件数</th><th>创建时间</th><th>操作</th></tr></thead>
         <tbody>${sharesHtml}</tbody></table>
-      </div>` : ''}
+      </div>` : '<div style="margin-bottom:14px;font-size:.82rem;color:var(--muted)"><i class="bi bi-share me-1"></i>暂无分享链接</div>'}
       ${filesHtml ? `
       <div>
         <div style="font-size:.8rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">文件列表</div>
@@ -856,8 +860,8 @@ async function renderTasks() {
         <td style="color:var(--muted);font-size:.8rem">${fmtDate(t.created_at)}</td>
         <td style="white-space:nowrap">
           ${t.status==='failed'||t.status==='skipped' ? `<button class="btn-sm-ghost" onclick="retryTask(${t.id})">重试</button>` : ''}
-          ${t.status==='pending' ? `<button class="btn-sm-danger" onclick="cancelTask(${t.id})" style="margin-left:4px">取消</button>` : ''}
-          ${'completed,failed,skipped'.includes(t.status) ? `<button class="btn-sm-danger" onclick="deleteTask(${t.id})" style="margin-left:4px">删除</button>` : ''}
+          ${(t.status==='pending'||t.status==='waiting_space') ? `<button class="btn-sm-danger" onclick="cancelTask(${t.id})" style="margin-left:4px">取消</button>` : ''}
+          ${['completed','failed','skipped','pending','waiting_space'].includes(t.status) ? `<button class="btn-sm-danger" onclick="deleteTask(${t.id})" style="margin-left:4px">删除</button>` : ''}
         </td>
       </tr>
       ${t.error_message ? `<tr style="background:rgba(248,81,73,.04)"><td colspan="6" style="padding:4px 12px 10px 48px;color:var(--red);font-size:.78rem;border-bottom:1px solid rgba(48,54,61,.5)"><i class="bi bi-exclamation-circle me-1"></i>${escHtml(t.error_message)}</td></tr>` : ''}`).join('')

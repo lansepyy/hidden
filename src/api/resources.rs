@@ -175,7 +175,7 @@ pub async fn get_resource_shares(
         SELECT id, resource_id, share_url, pick_code, share_code,
                share_title, share_type, file_count, total_size,
                status, last_checked_at, created_at
-        FROM shares WHERE resource_id = $1 AND status = 'active'
+        FROM shares WHERE resource_id = $1
         ORDER BY created_at DESC
         "#,
     )
