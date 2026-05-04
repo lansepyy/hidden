@@ -319,7 +319,7 @@ tr:hover td { background: rgba(28,33,40,.6); }
   <div class="card">
     <div id="shares-table-wrap" style="overflow-x:auto">
       <table>
-        <thead><tr><th>ID</th><th>TMDB 名称 / 分享标题</th><th>分享链接 / 提取码</th><th>文件数</th><th>状态</th><th>最后检查</th><th>操作</th></tr></thead>
+        <thead><tr><th>ID</th><th style="min-width:180px">TMDB 名称 / 分享标题</th><th>分享链接</th><th style="min-width:90px">提取码</th><th>文件数</th><th>状态</th><th>最后检查</th><th>操作</th></tr></thead>
         <tbody id="shares-tbody"></tbody>
       </table>
     </div>
@@ -683,16 +683,32 @@ function fmtDate(iso) {
   return d.toLocaleDateString('zh-CN') + ' ' + d.toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'});
 }
 function fmtSize(bytes) {
-  if (!bytes) return '—';
+  if (bytes == null || bytes === undefined) return '—';
+  if (bytes === 0) return '0 B';
   const units = ['B','KB','MB','GB','TB'];
   let i = 0, v = bytes;
   while (v > 1024 && i < 4) { v /= 1024; i++; }
   return v.toFixed(1) + ' ' + units[i];
 }
 function statusBadge(s) {
-  const map = { active:'badge-active', inactive:'badge-inactive', failed:'badge-failed', pending:'badge-pending', waiting_space:'badge-pending', completed:'badge-completed', skipped:'badge-inactive', organizing:'badge-pending', transferring:'badge-pending', parsing:'badge-pending', sharing:'badge-pending' };
-  const cls = map[s] || 'badge-inactive';
-  return `<span class="${cls}">${escHtml(s)}</span>`;
+  const labelMap = {
+    active: '活跃', inactive: '失效', failed: '损坏',
+    pending: '等待', waiting_space: '等待空间',
+    completed: '完成', skipped: '跳过',
+    organizing: '整理中', transferring: '转存中',
+    parsing: '解析中', sharing: '分享中',
+    transfer_failed: '转存失败', deleted: '已删除'
+  };
+  const clsMap = {
+    active:'badge-active', inactive:'badge-inactive', failed:'badge-failed', deleted:'badge-failed',
+    transfer_failed:'badge-failed',
+    pending:'badge-pending', waiting_space:'badge-pending', organizing:'badge-pending',
+    transferring:'badge-pending', parsing:'badge-pending', sharing:'badge-pending',
+    completed:'badge-completed', skipped:'badge-inactive'
+  };
+  const cls = clsMap[s] || 'badge-inactive';
+  const label = labelMap[s] || s;
+  return `<span class="${cls}">${escHtml(label)}</span>`;
 }
 function typeLabel(t) {
   const m = { movie:'🎬 电影', tv:'📺 剧集', anime:'🎌 动漫', variety:'🎤 综艺', documentary:'🎥 纪录片', other:'📦 其他' };
@@ -732,9 +748,9 @@ async function loadDashboard() {
       const usedEl = document.getElementById('s-quota-used');
       const freeEl = document.getElementById('s-quota-free');
       if (usedEl) usedEl.textContent = fmtSize(q.used);
-      if (freeEl) freeEl.textContent = q.free > 0 ? fmtSize(q.free) : '—';
+      if (freeEl) freeEl.textContent = fmtSize(q.free);
       document.getElementById('s-quota-total').textContent = fmtSize(q.total);
-      const pct = q.total > 0 ? Math.round(q.used / q.total * 100) : 0;
+      const pct = (q.total > 0 && !isNaN(q.used / q.total)) ? Math.round(q.used / q.total * 100) : 0;
       document.getElementById('s-quota-pct').textContent = pct + '% 已用';
       const fill = document.getElementById('s-quota-bar-fill');
       fill.style.width = pct + '%';
@@ -1115,7 +1131,7 @@ async function renderShares() {
   let qs = `?skip=${sharesPage * sharesLimit}&limit=${sharesLimit}`;
   if (sharesFilter) qs += '&status=' + sharesFilter;
   const tbody = document.getElementById('shares-tbody');
-  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px"><span class="spinner"></span></td></tr>';
+  tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px"><span class="spinner"></span></td></tr>';
   try {
     const data = await api('GET', '/shares' + qs);
     const items = data.items || [];
@@ -1129,45 +1145,46 @@ async function renderShares() {
         s.resource_type ? typeLabel(s.resource_type) : null,
         s.tmdb_id ? 'TMDB #' + s.tmdb_id : null
       ].filter(Boolean).join(' · ');
-      // 提取分享码：优先使用后端字段，否则从 URL 中解析
-      const shareCode = s.share_code || (s.share_url.match(/\/s\/([a-zA-Z0-9]+)/)?.[1]) || '—';
-      const pickCode  = s.pick_code  || '';
+      // 提取码（receive_code）— 与分享码（URL 里的 share_code）不同
+      const pickCode = s.pick_code || '';
       return `
       <tr>
         <td style="color:var(--muted);font-size:.8rem">#${s.id}</td>
-        <td style="max-width:200px">
-          <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px" title="${escHtml(displayTitle)}">${escHtml(displayTitle)}</div>
-          ${meta ? `<div style="color:var(--muted);font-size:.72rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px">${escHtml(meta)}</div>` : ''}
-          ${tmdbTitle && rawTitle && rawTitle !== tmdbTitle ? `<div style="color:var(--muted);font-size:.7rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px" title="${escHtml(rawTitle)}"><i class="bi bi-file-earmark-text me-1"></i>${escHtml(rawTitle)}</div>` : ''}
+        <td style="min-width:180px;max-width:260px">
+          <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(displayTitle)}">${escHtml(displayTitle)}</div>
+          ${meta ? `<div style="color:var(--muted);font-size:.72rem;white-space:nowrap">${escHtml(meta)}</div>` : ''}
+          ${tmdbTitle && rawTitle && rawTitle !== tmdbTitle ? `<div style="color:var(--muted);font-size:.7rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(rawTitle)}"><i class="bi bi-file-earmark-text me-1"></i>${escHtml(rawTitle)}</div>` : ''}
         </td>
-        <td style="max-width:240px">
-          <a href="${escHtml(s.share_url)}" target="_blank" style="font-size:.8rem;word-break:break-all">${escHtml(s.share_url)}</a>
-          <div style="margin-top:3px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-            <span style="font-family:monospace;font-size:.75rem;background:rgba(88,166,255,.12);color:var(--blue);border:1px solid rgba(88,166,255,.25);border-radius:4px;padding:1px 7px" title="分享码">${escHtml(shareCode)}</span>
-            ${pickCode ? `<span style="font-family:monospace;font-size:.75rem;background:rgba(188,140,255,.12);color:var(--purple);border:1px solid rgba(188,140,255,.25);border-radius:4px;padding:1px 7px" title="提取码">${escHtml(pickCode)}</span>` : ''}
-          </div>
+        <td style="max-width:220px;word-break:break-all">
+          <a href="${escHtml(s.share_url)}" target="_blank" style="font-size:.8rem">${escHtml(s.share_url)}</a>
+        </td>
+        <td>
+          ${pickCode
+            ? `<span style="font-family:monospace;font-size:.85rem;font-weight:700;background:rgba(210,153,34,.15);color:var(--yellow);border:1px solid rgba(210,153,34,.4);border-radius:4px;padding:2px 10px;user-select:all" title="点击可选中复制">${escHtml(pickCode)}</span>`
+            : `<span style="color:var(--muted);font-size:.75rem">无</span>`}
         </td>
         <td style="color:var(--muted);font-size:.8rem">${s.file_count||'—'}</td>
         <td>${statusBadge(s.status)}</td>
-        <td style="color:var(--muted);font-size:.8rem">${fmtDate(s.last_checked_at)}</td>
+        <td style="color:var(--muted);font-size:.8rem;white-space:nowrap">${fmtDate(s.last_checked_at)}</td>
         <td style="white-space:nowrap">
-          <button class="btn-sm-ghost" onclick="checkShare(${s.id})" title="验证链接">检查</button>
-          ${s.status !== 'active' ? `<button class="btn-sm-ghost" onclick="rebuildShare(${s.id})" title="重建链接" style="margin-left:4px">重建</button>` : ''}
-          <button class="btn-sm-danger" onclick="deleteShare(${s.id})" title="删除分享" style="margin-left:4px">删除</button>
+          <button class="btn-sm-ghost" onclick="checkShare(${s.id})" title="验证链接是否有效">检查</button>
+          ${s.status !== 'active' ? `<button class="btn-sm-ghost" onclick="rebuildShare(${s.id})" title="重建分享链接" style="margin-left:4px">重建</button>` : ''}
+          <button class="btn-sm-danger" onclick="deleteShare(${s.id})" title="删除此分享记录" style="margin-left:4px">删除</button>
         </td>
       </tr>`;
     }).join('')
-      : '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">暂无分享记录</td></tr>';
+      : '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">暂无分享记录</td></tr>';
     renderPager('shares-pager', sharesPage, Math.ceil((data.total||0) / sharesLimit), p => { sharesPage = p; renderShares(); });
   } catch(e) {
-    tbody.innerHTML = `<tr><td colspan="7" style="color:var(--red);padding:16px">${escHtml(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="color:var(--red);padding:16px">${escHtml(e.message)}</td></tr>`;
   }
 }
 async function checkShare(id) {
   try {
     toast('正在检查分享 #' + id + '…', 'info');
     const r = await api('POST', '/shares/' + id + '/check');
-    toast(`分享 #${id} 状态：${r.status}`, r.alive ? 'success' : 'error');
+    const alive = r.alive !== undefined ? r.alive : (r.status === 'active');
+    toast(`分享 #${id} 状态：${r.status === 'active' ? '活跃' : r.status === 'inactive' ? '已失效' : r.status}`, alive ? 'success' : 'error');
     if (currentPage === 'shares') renderShares();
   } catch(e) { toast(e.message, 'error'); }
 }
